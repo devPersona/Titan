@@ -73,3 +73,21 @@ type token_def =
 | EOF
 
 type token = token_def * span
+
+
+
+
+
+
+
+
+
+
+type err_kind = 
+| Err_in_file of err_kind * string
+| Err_at      of err_kind * span
+| Msg         of string
+| Missing     of string
+
+
+exception Err of err_kind
