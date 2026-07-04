@@ -1,4 +1,4 @@
 (executable
  (public_name Titan)
  (name main)
- (libraries Titan))
+ (libraries core))
