@@ -78,6 +78,12 @@ type token = token_def * span
 
 
 
+type lexer_ctx = {
+  filename:   string;
+  source:     string;
+  newlines: pos list;
+  mutable index: pos;
+}
 
 
 
@@ -85,7 +91,7 @@ type token = token_def * span
 
 type err_kind = 
 | Err_in_file of err_kind * string
-| Err_at      of err_kind * span
+| Err_at      of err_kind * span * pos list
 | Msg         of string
 | Missing     of string
 

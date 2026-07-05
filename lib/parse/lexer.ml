@@ -1,12 +1,7 @@
 open Ast
+open Span
 open Error
 
-type lexer_ctx = {
-  filename:   string;
-  source:     string;
-  mutable index: pos;
-  mutable newlines: pos list 
-}
 
 module CharMap   = Map.Make(Char)
 module StringMap = Map.Make(String)
@@ -74,19 +69,11 @@ let is_alnum c = is_alpha c || is_num c
 let is_ws    c = match c with ' ' | '\n' | '\t' | '\r'      -> true | _ -> false
 let is_sep   c = is_ws c || is_op c || is_punc c
 
-let span_make s_pos e_pos = 
-  { s_pos; e_pos }
-let span_of_pos pos = 
-  span_make pos pos
 
 let inc_ctx_by n ctx =
   ctx.index <- ctx.index + n
 let inc_ctx ctx = 
   inc_ctx_by 1 ctx
-let add_nl ctx =
-  ctx.newlines <- ctx.index :: ctx.newlines
-let inc_line ctx =
-  add_nl ctx; inc_ctx ctx
 let inc_and_get ctx =
   let span = span_make ctx.index (ctx.index + 1) in
   inc_ctx ctx; span
@@ -97,23 +84,24 @@ let consume_comment chars ctx =
   let buf = Buffer.create 16 in 
   let rec loop c =
     match c with
-    | '\n' :: tail -> inc_line ctx; tail
-    | head :: tail -> inc_ctx  ctx; Buffer.add_char buf head; loop tail
+    | '\n' :: tail -> tail
+    | head :: tail -> inc_ctx ctx; Buffer.add_char buf head; loop tail
     | []           -> [] (* let tokenize_raw handle it *)
   in 
   let s_pos   = ctx.index  in
   inc_ctx_by 2 ctx; (* for the inital '//' *)
   let rest    = loop chars in
-  (Comment (Buffer.contents buf), span_make s_pos ctx.index), rest
+  let span    = span_make s_pos ctx.index in
+  inc_ctx ctx; (* for the new line *)
+  (Comment (Buffer.contents buf), span), rest
 
 let consume_comment_block chars ctx =
   let buf = Buffer.create 16 in
   let rec loop c =
     match c with
     | '*' :: '/' :: tail -> inc_ctx_by 2 ctx; tail (* terminator *)
-    | '\n'       :: tail -> inc_line     ctx; Buffer.add_char buf '\n'; loop tail
     | head       :: tail -> inc_ctx      ctx; Buffer.add_char buf head; loop tail
-    | []                  -> err_at (Missing "*/") (span_of_pos ctx.index)  
+    | []                 -> err_in_file (Missing "*/") (span_of_pos ctx.index) ctx.newlines ctx.filename
   in
   let s_pos = ctx.index in
   inc_ctx_by 2 ctx; (* for the inital '/*' *)
@@ -127,13 +115,12 @@ let consume_str chars ctx =
   let rec loop c =
     match c with
     | '"'          :: tail -> inc_ctx ctx; tail (* terminator *)
-    | '\n'         :: tail -> add_nl  ctx; add '\n' 1 tail
     | '\\' :: '"'  :: tail -> add '"'  2 tail
     | '\\' :: '\\' :: tail -> add '\\' 2 tail
     | '\\' :: 'n'  :: tail -> add '\n' 2 tail
     | '\\' :: 't'  :: tail -> add '\t' 2 tail
     | head         :: tail -> add head 1 tail
-    | []                   -> err_at (Missing "\"") (span_of_pos ctx.index)  
+    | []                   -> err_in_file (Missing "\"") (span_of_pos ctx.index) ctx.newlines ctx.filename
   and add c inc rest = inc_ctx_by inc ctx; Buffer.add_char buf c; loop rest
   in 
   let s_pos = ctx.index  in 
@@ -151,7 +138,19 @@ let consume_num chars ctx =
   in 
   let s_pos          = ctx.index in
   let str, dot, rest = loop chars false [] in
-  let num            = if dot then Float (float_of_string str) else Int (int_of_string str) in
+  let num            = if dot then 
+    let f = 
+      match float_of_string_opt str with
+      | Some f -> f
+      | None   -> err_in_file (Msg "Float literal is too large") (span_of_pos ctx.index) ctx.newlines ctx.filename
+    in Float f
+  else 
+    let i = 
+      match int_of_string_opt str with
+      | Some i -> i
+      | None   -> err_in_file (Msg "Integer literal is too large") (span_of_pos ctx.index) ctx.newlines ctx.filename
+    in Int i
+  in
   (Basic num, span_make s_pos ctx.index), rest
 
 let consume_ident chars ctx =
@@ -173,11 +172,11 @@ let tokenize_raw chars ctx =
   let rec loop c acc =
     match c with
     | []                                     -> List.rev ((EOF, span_of_pos ctx.index) :: acc)
-    | '\n'       :: tail                     -> inc_line ctx; loop tail acc
     | ws         :: tail when is_ws     ws   -> inc_ctx  ctx; loop tail acc
     | '"'        :: tail                     -> let str,     rest = consume_str           tail ctx in loop rest (str     :: acc)
     | '/' :: '/' :: tail                     -> let comment, rest = consume_comment       tail ctx in loop rest (comment :: acc)
     | '/' :: '*' :: tail                     -> let comment, rest = consume_comment_block tail ctx in loop rest (comment :: acc)
+    | '@' :: ':' :: tail                     -> inc_ctx_by 2 ctx; loop tail ((Punc AtCol, inc_and_get ctx) :: acc)
     | op         :: tail when is_op     op   -> loop tail ((Op    (get_op   op  ), inc_and_get ctx) :: acc)
     | punc       :: tail when is_punc   punc -> loop tail ((Punc  (get_punc punc), inc_and_get ctx) :: acc)
     | num        :: _    when is_num    num  -> let num,     rest = consume_num           c    ctx in loop rest (num     :: acc)
@@ -185,7 +184,31 @@ let tokenize_raw chars ctx =
     | head       :: _                        -> err (Msg ("Unknown token: '" ^ str_of_char head ^ "'" ))
   in loop chars []
 
-  
+
+
+
+let merge_tokens tokens =
+  let rec loop t acc =
+    match t with
+    | []                                                             -> List.rev acc
+    | (Op   Add, s1) :: (Op   Asg, s2) :: tail when span_touch s1 s2 -> loop tail ((Op       AA, span_join s1 s2) :: acc)
+    | (Op   Sub, s1) :: (Op   Asg, s2) :: tail when span_touch s1 s2 -> loop tail ((Op       SA, span_join s1 s2) :: acc)
+    | (Op   Mul, s1) :: (Op   Asg, s2) :: tail when span_touch s1 s2 -> loop tail ((Op       MA, span_join s1 s2) :: acc)
+    | (Op   Div, s1) :: (Op   Asg, s2) :: tail when span_touch s1 s2 -> loop tail ((Op       DA, span_join s1 s2) :: acc)
+    | (Op   Asg, s1) :: (Op   Asg, s2) :: tail when span_touch s1 s2 -> loop tail ((Op       Eq, span_join s1 s2) :: acc)
+    | (Op    Gt, s1) :: (Op   Asg, s2) :: tail when span_touch s1 s2 -> loop tail ((Op       Ge, span_join s1 s2) :: acc)
+    | (Op    Lt, s1) :: (Op   Asg, s2) :: tail when span_touch s1 s2 -> loop tail ((Op       Le, span_join s1 s2) :: acc)
+    | (Op   Add, s1) :: (Op   Add, s2) :: tail when span_touch s1 s2 -> loop tail ((Op      Inc, span_join s1 s2) :: acc)
+    | (Op   Sub, s1) :: (Op   Sub, s2) :: tail when span_touch s1 s2 -> loop tail ((Op      Dec, span_join s1 s2) :: acc)
+    | (Op   Not, s1) :: (Op   Asg, s2) :: tail when span_touch s1 s2 -> loop tail ((Op      Neq, span_join s1 s2) :: acc)
+    | (Op   Amp, s1) :: (Op   Amp, s2) :: tail when span_touch s1 s2 -> loop tail ((Op      And, span_join s1 s2) :: acc)
+    | (Op   Pip, s1) :: (Op   Pip, s2) :: tail when span_touch s1 s2 -> loop tail ((Op       Or, span_join s1 s2) :: acc)
+    | (Op   Sub, s1) :: (Op    Gt, s2) :: tail when span_touch s1 s2 -> loop tail ((Punc RArrow, span_join s1 s2) :: acc)
+    | (Punc Dot, s1) :: (Punc Dot, s2) :: tail when span_touch s1 s2 -> loop tail ((Punc     DD, span_join s1 s2) :: acc)
+    | head                             :: tail                       -> loop tail (head                           :: acc)
+  in loop tokens []
+
+
 
 
 let read filename = 
@@ -194,6 +217,6 @@ let read filename =
 
 let tokenize filename =
   let source = read filename in
-  let ctx    = { filename; source; index = 0; newlines = [] } in
+  let ctx    = { filename; source; index = 0; newlines = get_nl_list source } in
   let chars  = List.init (String.length source) (String.get source) in
-  tokenize_raw chars ctx 
+  tokenize_raw chars ctx |> merge_tokens, ctx
