@@ -5,6 +5,7 @@ open Error
 open Debug
 
 
+
 let empty_ctx tbl dir curr newlines = 
 {
   tbl;
@@ -28,7 +29,7 @@ let add_err      kind span   ctx = ctx.errors <- (Syntax_err (make_err_in_file k
 
 let path_of_name path ctx = ctx.dir ^ "/" ^ String.concat "/" path ^ ".ttn"
 let file_exists  path ctx =
-  path_of_name path ctx |> Sys.file_exists 
+  path_of_name path ctx |> Sys.file_exists
 
 
 
@@ -46,6 +47,33 @@ let pack_param param metadata span:param_info = { param; metadata; span }
 let pack_binop e1 op e2                       = pack_expr (EBinOp (e1, op, e2)) (span_join e1.span e2.span)
 let pack_lunop op e s                         = pack_expr (ELUnOp (op, e     )) (span_join s e.span       )
 let pack_runop e op s                         = pack_expr (ERUnOp (e, op     )) (span_join e.span s       )
+
+let pack_tuple (exprs:expr list) s =
+  match exprs with
+  | [x] -> { x with span = s }
+  | _   -> pack_expr (ETuple exprs) s
+
+let pack_type_tuple types =
+  match types with
+  | []  -> TUnit
+  | [t] -> t
+  | _   -> TTuple types
+
+let type_of_params params = 
+  let rec loop (p:param_info list) acc =
+    match p with
+    | []            -> pack_type_tuple (List.rev acc)
+    | param :: rest -> loop rest (snd (param.param) :: acc)
+  in loop params []
+
+let wrap_expr s func tokens ctx =
+  let restore = ss_pos s.s_pos ctx in
+  let expr, rest = func tokens ctx in
+  restore();
+  expr, rest
+
+
+
 
 
 
@@ -69,6 +97,9 @@ let rec needs_semicol expr =
   | EReturn e         -> needs_semicol e
   | EPoly (d, _)      -> needs_semicol d
   | _                 -> true
+let check_semicol expr tokens ctx =
+  if needs_semicol expr && not (semicol_next tokens) then add_err (Missing "';'") (span_of_pos expr.span.e_pos) ctx;
+  consume_semicols tokens
 
 
 
@@ -160,14 +191,9 @@ and parse_type_tuple tokens ctx =
     let rec loop t acc = 
       match t with
       | (Punc Comma,  _) :: tail -> let typ, rest = parse_type_leaf tail ctx in loop rest (typ :: acc)
-      | (Punc RParen, s) :: tail -> ctx.pos_e <- s.e_pos; eliminate_type_tuple (List.rev acc), tail
+      | (Punc RParen, s) :: tail -> ctx.pos_e <- s.e_pos; pack_type_tuple (List.rev acc), tail
       | _                        -> err_at_token (Expected ", or )") t ctx
     in loop rest [first]
-and eliminate_type_tuple types =
-  match types with
-  | []  -> TUnit
-  | [t] -> t
-  | _   -> TTuple types
 
 and parse_type_leaf tokens ctx =
   let t, rest = 
@@ -178,6 +204,15 @@ and parse_type_leaf tokens ctx =
   match rest with
   | (Op Asg, _) :: tail -> let expr, rest = parse_expr tail ctx in TDefault (t, expr), rest
   | _                   -> t, rest
+
+
+
+
+
+
+
+
+
 
 
 
@@ -230,6 +265,49 @@ and parse_generic_args tokens ctx =
   | Some args, rest -> args, rest
   | None,      _    -> err_at_token (Expected "generic argument") tokens ctx
 
+and parse_generic_param tokens ctx =
+  match tokens with
+  | (Ident name, s) :: (Punc Col, _) :: tail -> let typ, rest = parse_type tail ctx in { param = GPConst ({ name; span = s }, typ); metadata = []; span = span_join s (span_of_pos ctx.pos_e) }, rest
+  | (Ident typ,  s)                  :: tail -> { param = GPTypename typ; metadata = []; span = s }, tail
+  | _                                        -> err_at_token (Invalid "generic parameter") tokens ctx
+
+and parse_generic_params tokens ctx =
+  let first, rest = parse_generic_param tokens ctx in
+  let rec loop t acc =
+    match t with
+    | (Op   Gt,    s) :: tail -> ctx.pos_e <- s.e_pos; List.rev acc, tail
+    | (Punc Comma, _) :: tail -> let param, rest = parse_generic_param tail ctx in loop rest (param :: acc)
+    | _                       -> err_at_token (Expected ", or >") t ctx
+  in loop rest [first]
+
+
+
+
+
+
+
+and parse_meta_arg tokens ctx =
+  try
+    let expr, rest = parse_expr tokens ctx in MAExpr expr, rest
+  with Err _ -> 
+    match tokens with
+    | (Op op, _) :: rest -> MAOp op, rest
+    | _                  -> err_at_token (Invalid "metadata argument") tokens ctx
+and parse_meta_args tokens ctx =
+  let rec loop t acc =
+    match t with
+    | (Punc RParen, s) :: tail -> ctx.pos_e <- s.e_pos; List.rev acc, tail
+    | (Punc Comma,  _) :: tail -> let arg, rest = parse_meta_arg tail ctx in loop rest (arg :: acc)
+    | _                        -> err_at_token (Expected ", or )") t ctx
+  in
+  match tokens with
+  | (Punc RParen, s) :: tail -> ctx.pos_e <- s.e_pos; [], tail
+  | _                        -> let first, rest = parse_meta_arg tokens ctx in loop rest [first]
+and parse_meta tokens ctx = 
+  match tokens with
+  | (Ident name, _) :: (Punc LParen, _) :: tail -> let args, rest = parse_meta_args tail ctx in pack_mod (MMeta (name, args)) (span_make ctx.pos_s ctx.pos_e), tail
+  | (Ident name, s)                     :: tail -> pack_mod (MMeta (name, [])) (span_make ctx.pos_s s.e_pos), tail
+  | _                                           -> err_at_token (Expected "metadata name") tokens ctx
 
 
 
@@ -244,31 +322,29 @@ and parse_generic_args tokens ctx =
 
 
 
-
-and get_expr s func tokens ctx =
-  let restore = ss_pos s.s_pos ctx in
-  let expr, rest = func tokens ctx in
-  restore();
-  expr, rest
 and get_type tokens ctx =
   match tokens with
   | (Punc Col, _) :: rest -> parse_type rest ctx
   | _                     -> TUnknown, tokens
-and get_params_type params = 
-  if params = [] then TUnit else
-  let rec loop (p:param_info list) acc =
-    match p with
-    | []            -> TTuple (List.rev acc)
-    | param :: rest -> loop rest (snd (param.param) :: acc)
-  in loop params []
 and get_generic_args tokens ctx =
   match tokens with
   | (Op Lt, _) :: rest -> parse_generic_args rest ctx
   | _                  -> [], tokens
-
-
-
-
+and get_generic_params tokens ctx =
+  match tokens with
+  | (Op Lt, s) :: tail -> let params, rest = parse_generic_params tail ctx in params, rest
+  | _                  -> [], tokens
+and get_mods tokens ctx =
+  let rec loop t acc =
+    match t with
+    | (Kw KwPublic,  s) :: tail -> loop tail (pack_mod MPublic  s :: acc)
+    | (Kw KwPrivate, s) :: tail -> loop tail (pack_mod MPrivate s :: acc)
+    | (Kw KwStatic,  s) :: tail -> loop tail (pack_mod MStatic  s :: acc)
+    | (Kw KwInline,  s) :: tail -> loop tail (pack_mod MInline  s :: acc)
+    | (Kw KwExtern,  s) :: tail -> loop tail (pack_mod MExtern  s :: acc)
+    | (Punc AtCol,   s) :: tail -> let res = ss_pos s.s_pos ctx in let meta, rest = parse_meta tail ctx in res(); loop rest (meta :: acc)
+    | _                         -> List.rev acc, t
+  in loop tokens []
 
 
 
@@ -282,7 +358,6 @@ and get_generic_args tokens ctx =
 and parse_expr tokens ctx =
   let mods, rest      = get_mods  tokens ctx in
   let expr, remaining = parse_asg rest   ctx in
-  debug_expr_span expr ctx.curr ctx.newlines |> print_endline;
   { expr with mods }, remaining
 
 and parse_asg tokens ctx =
@@ -392,21 +467,34 @@ and parse_runop tokens ctx =
   in loop left rest
 and parse_primary tokens ctx =
   match tokens with
-  | (Basic b,       s) :: rest -> pack_expr (ELit b)    s, rest
-  | (Ident "this",  s) :: rest -> pack_expr (EThis )    s, rest
+  | (Basic b,       s) :: rest -> pack_expr (ELit    b) s, rest
+  | (Ident "this",  s) :: rest -> pack_expr (EThis    ) s, rest
   | (Ident name,    s) :: rest -> pack_expr (EVar name) s, rest
 
-  | (Kw KwVar,      s) :: rest -> get_expr s parse_decl  rest ctx
-  | (Kw KwIf,       s) :: rest -> get_expr s parse_if    rest ctx
-  | (Kw KwFunc,     s) :: rest -> get_expr s parse_func  rest ctx
-  | (Kw KwRet,      s) :: rest -> get_expr s parse_ret   rest ctx
-  | (Kw KwTrace,    s) :: rest -> get_expr s parse_trace rest ctx
+  | (Kw KwVar,      s) :: rest -> wrap_expr s parse_decl  rest ctx
+  | (Kw KwIf,       s) :: rest -> wrap_expr s parse_if    rest ctx
+  | (Kw KwFunc,     s) :: rest -> wrap_expr s parse_func  rest ctx
+  | (Kw KwRet,      s) :: rest -> wrap_expr s parse_ret   rest ctx
+  | (Kw KwTrace,    s) :: rest -> wrap_expr s parse_trace rest ctx
 
-  | (Punc LBracket, s) :: rest -> get_expr s parse_array rest ctx
-  | (Punc LParen,   s) :: rest -> get_expr s parse_tuple rest ctx
-  | (Punc LBrace,   s) :: rest -> get_expr s parse_block rest ctx
+  | (Punc LBracket, s) :: rest -> wrap_expr s parse_array rest ctx
+  | (Punc LParen,   s) :: rest -> wrap_expr s parse_tuple rest ctx
+  | (Punc LBrace,   s) :: rest -> wrap_expr s parse_block rest ctx
 
   | _                          -> err_at_token (Expected "expression") tokens ctx
+
+and parse_ternay con tokens ctx =
+  let tru, rest      = parse_expr tokens ctx in
+  let els, remaining =
+    match rest with
+    | (Punc Col, _) :: rest -> parse_expr rest ctx
+    | _                     -> err_at_token (Expected "':'") rest ctx
+  in pack_expr (EIf (con, tru, els)) (span_join con.span els.span), remaining
+
+and parse_type_path_expr expr tokens ctx =
+  match expr.expr with
+  | EVar dir -> ctx.pos_e <- expr.span.s_pos; let t, rest = parse_type_path dir tokens ctx in pack_expr (EType t) (span_make expr.span.s_pos ctx.pos_e), rest
+  | _        -> err_at_token (Invalid "type path") tokens ctx
 
 and parse_decl tokens ctx =
   let name, rest =
@@ -438,54 +526,6 @@ and parse_if tokens ctx =
     | _                      -> pack_expr EEmpty tru.span, remaining
   in pack_expr (EIf (con, tru, els)) (span_make ctx.pos_s con.span.e_pos), final
 
-and parse_ternay con tokens ctx =
-  let tru, rest      = parse_expr tokens ctx in
-  let els, remaining =
-    match rest with
-    | (Punc Col, _) :: rest -> parse_expr rest ctx
-    | _                     -> err_at_token (Expected "':'") rest ctx
-  in pack_expr (EIf (con, tru, els)) (span_join con.span els.span), remaining
-
-and parse_array tokens ctx = 
-  let old = ctx.allow_gt in
-  ctx.allow_gt <- true;
-  match tokens with 
-  | (Punc RBracket, s) :: rest -> pack_expr (EArray []) (span_make ctx.pos_s s.e_pos), rest
-  | _                          -> 
-    let expr, rest = parse_expr tokens ctx in
-    let rec loop t acc =
-      match t with
-      | (Punc RBracket, s) :: rest -> pack_expr (EArray (List.rev acc)) (span_make ctx.pos_s s.e_pos), rest
-      | (Punc Comma,    _) :: rest -> let expr, remaining = parse_expr rest ctx in loop remaining (expr :: acc)
-      | _                          -> err_at_token (Expected ", or ]") t ctx
-    in ctx.allow_gt <- old; loop rest [expr] 
-
-and parse_tuple tokens ctx =
-  let old = ctx.allow_gt in
-  ctx.allow_gt <- true;
-  match tokens with 
-  | (Punc RParen, s) :: rest -> pack_expr (ETuple []) (span_make ctx.pos_s s.e_pos), rest
-  | _                        -> 
-    let expr, rest = parse_expr tokens ctx in
-    let rec loop t acc =
-      match t with
-      | (Punc RParen, s) :: rest -> eliminate_tuple (List.rev acc) (span_make ctx.pos_s s.e_pos), rest
-      | (Punc Comma,  _) :: rest -> let expr, remaining = parse_expr rest ctx in loop remaining (expr :: acc)
-      | _                        -> err_at_token (Expected ", or )") t ctx
-    in ctx.allow_gt <- old; loop rest [expr] 
-and eliminate_tuple exprs s =
-  match exprs with
-  | [x] -> x
-  | _   -> pack_expr (ETuple exprs) s
-
-and parse_block tokens ctx =
-  let rec loop t acc =
-    match t with
-    | (Punc RBrace, s) :: rest -> pack_expr (EBlock (List.rev acc)) (span_make ctx.pos_s s.e_pos), rest
-    | [(EOF,         s)]       -> err_at_span (Missing "'}'") s ctx
-    | _                        -> let stmt, rest = parse_stmt [] t ctx in loop rest (stmt :: acc)
-  in loop tokens []
-
 and parse_func tokens ctx =
   match tokens with
   | (Ident name,   s) :: rest -> parse_func_decl (pack_name name s) rest   ctx
@@ -499,8 +539,8 @@ and parse_lambda tokens ctx =
     let ret, final        = get_type remaining ctx in
     let body, final'      = if semicol_next final then pack_expr EEmpty (span_of_pos ctx.pos_e), final else parse_expr final ctx in
     if generics = [] then
-      pack_expr (ELambda (params, TFunc (get_params_type params, ret), body)) (span_make ctx.pos_s body.span.e_pos), final'
-    else let expr = pack_expr (ELambda (params, TPoly (TFunc (get_params_type params, ret), generics), body)) (span_make ctx.pos_s body.span.e_pos) in
+      pack_expr (ELambda (params, TFunc (type_of_params params, ret), body)) (span_make ctx.pos_s body.span.e_pos), final'
+    else let expr = pack_expr (ELambda (params, TPoly (TFunc (type_of_params params, ret), generics), body)) (span_make ctx.pos_s body.span.e_pos) in
       pack_expr (EPoly (expr, generics)) expr.span, final'
   | _ -> err_at_token (Expected "parameter list") tokens ctx
 
@@ -541,6 +581,7 @@ and parse_param tokens ctx =
     | _                     -> err_at_token (Msg "Implicit parameter types are not allowed") rest ctx
   in pack_param (name, typ) mods (span_make name.span.e_pos ctx.pos_e), final
 
+
 and parse_ret tokens ctx =
   let expr, rest = parse_expr tokens ctx in
   pack_expr (EReturn expr) (span_make ctx.pos_s expr.span.e_pos), rest
@@ -550,85 +591,57 @@ and parse_trace tokens ctx =
   | (Punc LParen, _) :: rest -> let expr, remaining = parse_tuple rest ctx in pack_expr (ETrace expr) (span_make ctx.pos_s expr.span.e_pos), remaining
   | _                        -> err_at_token (Expected "'('") tokens ctx
 
+and parse_array tokens ctx = 
+  let old = ctx.allow_gt in
+  ctx.allow_gt <- true;
+  match tokens with 
+  | (Punc RBracket, s) :: rest -> pack_expr (EArray []) (span_make ctx.pos_s s.e_pos), rest
+  | _                          -> 
+    let expr, rest = parse_expr tokens ctx in
+    let rec loop t acc =
+      match t with
+      | (Punc RBracket, s) :: rest -> pack_expr (EArray (List.rev acc)) (span_make ctx.pos_s s.e_pos), rest
+      | (Punc Comma,    _) :: rest -> let expr, remaining = parse_expr rest ctx in loop remaining (expr :: acc)
+      | _                          -> err_at_token (Expected ", or ]") t ctx
+    in ctx.allow_gt <- old; loop rest [expr] 
 
+and parse_tuple tokens ctx =
+  let old = ctx.allow_gt in
+  ctx.allow_gt <- true;
+  match tokens with 
+  | (Punc RParen, s) :: rest -> pack_expr (ETuple []) (span_make ctx.pos_s s.e_pos), rest
+  | _                        -> 
+    let expr, rest = parse_expr tokens ctx in
+    let rec loop t acc =
+      match t with
+      | (Punc RParen, s) :: rest -> pack_tuple (List.rev acc) (span_make ctx.pos_s s.e_pos), rest
+      | (Punc Comma,  _) :: rest -> let expr, remaining = parse_expr rest ctx in loop remaining (expr :: acc)
+      | _                        -> err_at_token (Expected ", or )") t ctx
+    in ctx.allow_gt <- old; loop rest [expr] 
 
-
-
-
-and parse_type_path_expr expr tokens ctx =
-  match expr.expr with
-  | EVar dir -> ctx.pos_e <- expr.span.s_pos; let t, rest = parse_type_path dir tokens ctx in pack_expr (EType t) (span_make expr.span.s_pos ctx.pos_e), rest
-  | _        -> err_at_token (Invalid "type path") tokens ctx
-
-
-
-
-
-
-
-
-
-and parse_generic_param tokens ctx =
-  match tokens with
-  | (Ident name, s) :: (Punc Col, _) :: tail -> let typ, rest = parse_type tail ctx in { param = GPConst ({ name; span = s }, typ); metadata = []; span = span_join s (span_of_pos ctx.pos_e) }, rest
-  | (Ident typ,  s)                  :: tail -> { param = GPTypename typ; metadata = []; span = s }, tail
-  | _                                        -> err_at_token (Invalid "generic parameter") tokens ctx
-
-and parse_generic_params tokens ctx =
-  let first, rest = parse_generic_param tokens ctx in
+and parse_block tokens ctx =
   let rec loop t acc =
     match t with
-    | (Op   Gt,    s) :: tail -> ctx.pos_e <- s.e_pos; List.rev acc, tail
-    | (Punc Comma, _) :: tail -> let param, rest = parse_generic_param tail ctx in loop rest (param :: acc)
-    | _                       -> err_at_token (Expected ", or >") t ctx
-  in loop rest [first]
-
-and get_generic_params tokens ctx =
-  match tokens with
-  | (Op Lt, s) :: tail -> let params, rest = parse_generic_params tail ctx in params, rest
-  | _                  -> [], tokens
-
-and parse_class_name tokens ctx =
-  match tokens with
-  | (Ident name, s) :: tail -> let generics, rest = get_generic_params tail ctx in { name; span = s }, generics, tail
-  | _                       -> err_at_token (Expected "class name") tokens ctx
-
-
-and parse_meta_arg tokens ctx =
-  try
-    let expr, rest = parse_expr tokens ctx in MAExpr expr, rest
-  with Err _ -> 
-    match tokens with
-    | (Op op, _) :: rest -> MAOp op, rest
-    | _                  -> err_at_token (Invalid "metadata argument") tokens ctx
-and parse_meta_args tokens ctx =
-  let rec loop t acc =
-    match t with
-    | (Punc RParen, s) :: tail -> List.rev acc, s, tail
-    | (Punc Comma,  s) :: tail -> let arg, rest = parse_meta_arg tail ctx in loop rest (arg :: acc)
-    | _                        -> err_at_token (Expected ", or )") t ctx
-  in
-  match tokens with
-  | (Punc RParen, s) :: tail -> [], s, tail
-  | _                        -> let first, rest = parse_meta_arg tokens ctx in loop rest [first]
-
-and parse_meta tokens s_span ctx = 
-  match tokens with
-  | (Ident name, _) :: (Punc LParen, _) :: tail -> let args, s, rest = parse_meta_args tail ctx in pack_mod (MMeta (name, args)) (span_join s_span s), tail
-  | (Ident name, s)                     :: tail -> pack_mod (MMeta (name, [])) (span_join s_span s), tail
-  | _                                           -> err_at_token (Expected "metadata name") tokens ctx
-
-and get_mods tokens ctx =
-  let rec loop t acc =
-    match t with
-    | (Kw KwPublic,  s) :: tail -> loop tail (pack_mod MPublic  s :: acc)
-    | (Kw KwPrivate, s) :: tail -> loop tail (pack_mod MPrivate s :: acc)
-    | (Kw KwStatic,  s) :: tail -> loop tail (pack_mod MStatic  s :: acc)
-    | (Kw KwInline,  s) :: tail -> loop tail (pack_mod MInline  s :: acc)
-    | (Kw KwExtern,  s) :: tail -> loop tail (pack_mod MExtern  s :: acc)
-    | (Punc AtCol,   s) :: tail -> let meta, rest = parse_meta tail s ctx in loop rest (meta :: acc)
-    | _                         -> List.rev acc, t
+    | (Punc RBrace, s) :: rest -> pack_expr (EBlock (List.rev acc)) (span_make ctx.pos_s s.e_pos), rest
+    | [(EOF,         s)]       -> err_at_span (Missing "'}'") s ctx
+    | _                        -> let stmt, rest = parse_stmt [] t ctx in loop rest (stmt :: acc)
   in loop tokens []
+
+
+
+
+
+
+
+and parse_stmt mods tokens ctx =
+  let expr, rest = parse_expr (consume_semicols tokens) ctx in
+  { stmt = SExpr { expr with mods = expr.mods @ mods }; span = expr.span }, check_semicol expr tokens ctx
+
+
+
+
+
+
 
 and parse_class_field tokens mods ctx = 
   let decl, rest = parse_decl tokens ctx in
@@ -637,9 +650,7 @@ and parse_class_field tokens mods ctx =
     |                 EDecl (name, typ, default)                 -> CMField { name; generics = []; typ; default }
     | EPoly ({ expr = EDecl (name, typ, default); _ }, generics) -> CMField { name; generics;      typ; default }
     | _                                                          -> assert false (* errors should be caught in parse_decl *)
-  in
-  if needs_semicol decl && not (semicol_next rest) then err_at_span (Missing "';'") (span_of_pos decl.span.e_pos) ctx
-  else { member; mods; span = decl.span }, (consume_semicols rest)
+  in { member; mods; span = decl.span }, check_semicol decl rest ctx
 
 and parse_class_method tokens mods ctx =
   let name, tail = 
@@ -653,9 +664,7 @@ and parse_class_method tokens mods ctx =
     |                 EDecl (name, typ, { expr = ELambda (params, _, body); _ })                 -> CMMethod { name; generics = []; typ; params; body }
     | EPoly ({ expr = EDecl (name, typ, { expr = ELambda (params, _, body); _ }); _ }, generics) -> CMMethod { name; generics;      typ; params; body }
     | _                                                                                          -> assert false (* errors should be caught in parse_func_decl *)
-  in
-  if needs_semicol decl && not (semicol_next rest) then err_at_span (Missing "';'") (span_of_pos decl.span.e_pos) ctx
-  else { member; mods; span = decl.span }, (consume_semicols rest)
+  in { member; mods; span = decl.span }, check_semicol decl rest ctx
 
 
 and parse_class_body tokens ctx =
@@ -675,18 +684,18 @@ and parse_class_body tokens ctx =
   in loop tokens [] [] [] 
 
 and parse_class tokens mods ctx =
-  let name, generics, rest = parse_class_name tokens ctx in
-  match rest with
+  let name, rest = 
+    match tokens with
+    | (Ident name, s) :: tail -> { name; span = s }, tail
+    | _                       -> err_at_token (Expected "class name") tokens ctx
+  in
+  let generics, remaining = get_generic_params rest ctx in
+  match remaining with
   | (Punc SemiCol, _) :: tail -> let e_pos = if generics = [] then name.span.e_pos else ctx.pos_e in pack_item (IClass { name; mods; generics; members = [] }) (span_make ctx.pos_s e_pos), tail
   | (Punc LBrace,  _) :: tail -> let members, e_pos, rest = parse_class_body tail ctx in pack_item (IClass { name; mods; generics; members }) (span_make ctx.pos_s e_pos), rest
   | _                         -> err_at_token (Expected "'}'") rest ctx 
 
-  
 
-and parse_stmt mods tokens ctx =
-  let expr, rest = parse_expr (consume_semicols tokens) ctx in
-  if needs_semicol expr && not (semicol_next rest) then err_at_span (Missing "';'") (span_of_pos expr.span.e_pos) ctx
-  else { stmt = SExpr { expr with mods = expr.mods @ mods }; span = expr.span }, (consume_semicols rest)
 
 
 let parse_item tokens ctx =
@@ -756,15 +765,12 @@ and parse_module tokens ctx =
 
 and parse main = 
   let tokens, lexer_ctx = tokenize main in
-  List.iter (fun t -> debug_token t |> print_endline) tokens; print_endline "\n";
   let abs  = Unix.realpath    main in
   let dir  = Filename.dirname  abs in
   let curr = Filename.basename abs in
-  let tbl  = Hashtbl.create 8      in 
+  let tbl  = Hashtbl.create 8      in
   let ctx  = empty_ctx tbl dir curr lexer_ctx.newlines in
-  (* DEBUG *)
   let m    = parse_module tokens ctx in
-  debug_module m |> print_endline;
   Hashtbl.add tbl [curr] m;
   List.iter (fun i -> load_import i ctx) m.imports;
   ctx

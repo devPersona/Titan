@@ -75,10 +75,11 @@ let inc_ctx_by n ctx =
   ctx.index <- ctx.index + n
 let inc_ctx ctx = 
   inc_ctx_by 1 ctx
-let inc_and_get ctx =
-  let span = span_make ctx.index (ctx.index + 1) in
-  inc_ctx ctx; span
-
+let inc_by_and_get n ctx =
+  let span = span_make ctx.index (ctx.index + n) in
+  inc_ctx_by n ctx; span
+let inc_and_get ctx = 
+  inc_by_and_get 1 ctx
 
 
 let consume_comment chars ctx =
@@ -177,9 +178,9 @@ let tokenize_raw chars ctx =
     | '"'        :: tail                     -> let str,     rest = consume_str           tail ctx in loop rest (str     :: acc)
     | '/' :: '/' :: tail                     -> let comment, rest = consume_comment       tail ctx in loop rest (comment :: acc)
     | '/' :: '*' :: tail                     -> let comment, rest = consume_comment_block tail ctx in loop rest (comment :: acc)
-    | '@' :: ':' :: tail                     -> inc_ctx_by 2 ctx; loop tail ((Punc AtCol, inc_and_get ctx) :: acc)
-    | op         :: tail when is_op     op   -> loop tail ((Op    (get_op   op  ), inc_and_get ctx) :: acc)
-    | punc       :: tail when is_punc   punc -> loop tail ((Punc  (get_punc punc), inc_and_get ctx) :: acc)
+    | '@' :: ':' :: tail                     -> loop tail ((Punc AtCol,           inc_by_and_get 2 ctx) :: acc)
+    | op         :: tail when is_op     op   -> loop tail ((Op   (get_op   op  ), inc_and_get      ctx) :: acc)
+    | punc       :: tail when is_punc   punc -> loop tail ((Punc (get_punc punc), inc_and_get      ctx) :: acc)
     | num        :: _    when is_num    num  -> let num,     rest = consume_num           c    ctx in loop rest (num     :: acc)
     | alpha      :: _    when is_alpha alpha -> let ident,   rest = consume_ident         c    ctx in loop rest (ident   :: acc)
     | head       :: _                        -> err_in_file (Msg ("Unknown token: '" ^ str_of_char head ^ "'" )) (span_make ctx.index (ctx.index + 1)) ctx.newlines ctx.filename

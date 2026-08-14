@@ -210,5 +210,4 @@ let debug_module m =
   concat "\n" (List.map debug_import m.imports) ^ "\n" ^ String.concat "\n" (List.map debug_item m.items)
 
 
-
-let debug_expr_span e file nl = debug_expr e ^ " in file \"" ^ file ^ "\", " ^ debug_span e.span nl
+let debug_with_span func item span file nl = func item ^ " in file \"" ^ file ^ "\", " ^ debug_span span nl |> print_endline
