@@ -32,6 +32,7 @@ let is_op  c = CharMap.mem  c op_map
 
 let punc_list = [
   ('.', Dot     );
+  (',', Comma   );
   (':', Col     );
   (';', SemiCol );
   ('?', QMark   );
@@ -47,18 +48,18 @@ let get_punc p = CharMap.find p punc_map
 let is_punc  p = CharMap.mem  p punc_map
 
 let kw_list = [
-  ("var",     KwVar    );
-  ("func",    KwFunc   );
-  ("return",  KwRet    );
-  ("if",      KwIf     );
-  ("else",    KwElse   );
-  ("class",   KwClass  );
-  ("public",  KwPublic );
-  ("private", KwPrivate);
-  ("static",  KwStatic );
-  ("inline",  KwInline );
-  ("extern",  KwExtern );
-  ("import",  KwImport )
+  ("var",      KwVar    );
+  ("function", KwFunc   );
+  ("return",   KwRet    );
+  ("if",       KwIf     );
+  ("else",     KwElse   );
+  ("class",    KwClass  );
+  ("public",   KwPublic );
+  ("private",  KwPrivate);
+  ("static",   KwStatic );
+  ("inline",   KwInline );
+  ("extern",   KwExtern );
+  ("import",   KwImport )
 ]
 let kw_map   = kw_list |> List.to_seq |> StringMap.of_seq
 
@@ -101,7 +102,7 @@ let consume_comment_block chars ctx =
     match c with
     | '*' :: '/' :: tail -> inc_ctx_by 2 ctx; tail (* terminator *)
     | head       :: tail -> inc_ctx      ctx; Buffer.add_char buf head; loop tail
-    | []                 -> err_in_file (Missing "*/") (span_of_pos ctx.index) ctx.newlines ctx.filename
+    | []                 -> err_in_file (Missing "'*/'") (span_of_pos ctx.index) ctx.newlines ctx.filename
   in
   let s_pos = ctx.index in
   inc_ctx_by 2 ctx; (* for the inital '/*' *)
@@ -120,7 +121,7 @@ let consume_str chars ctx =
     | '\\' :: 'n'  :: tail -> add '\n' 2 tail
     | '\\' :: 't'  :: tail -> add '\t' 2 tail
     | head         :: tail -> add head 1 tail
-    | []                   -> err_in_file (Missing "\"") (span_of_pos ctx.index) ctx.newlines ctx.filename
+    | []                   -> err_in_file (Missing "'\"'") (span_of_pos ctx.index) ctx.newlines ctx.filename
   and add c inc rest = inc_ctx_by inc ctx; Buffer.add_char buf c; loop rest
   in 
   let s_pos = ctx.index  in 
@@ -161,7 +162,7 @@ let consume_ident chars ctx =
   in 
   let s_pos       = ctx.index     in
   let ident, rest = loop chars [] in
-  let token       = 
+  let token       = if ident = "new" then Op New else
     match StringMap.find_opt ident kw_map with
     | Some kw -> Kw    kw
     | None    -> Ident ident
@@ -181,7 +182,7 @@ let tokenize_raw chars ctx =
     | punc       :: tail when is_punc   punc -> loop tail ((Punc  (get_punc punc), inc_and_get ctx) :: acc)
     | num        :: _    when is_num    num  -> let num,     rest = consume_num           c    ctx in loop rest (num     :: acc)
     | alpha      :: _    when is_alpha alpha -> let ident,   rest = consume_ident         c    ctx in loop rest (ident   :: acc)
-    | head       :: _                        -> err (Msg ("Unknown token: '" ^ str_of_char head ^ "'" ))
+    | head       :: _                        -> err_in_file (Msg ("Unknown token: '" ^ str_of_char head ^ "'" )) (span_make ctx.index (ctx.index + 1)) ctx.newlines ctx.filename
   in loop chars []
 
 
@@ -204,7 +205,7 @@ let merge_tokens tokens =
     | (Op   Amp, s1) :: (Op   Amp, s2) :: tail when span_touch s1 s2 -> loop tail ((Op      And, span_join s1 s2) :: acc)
     | (Op   Pip, s1) :: (Op   Pip, s2) :: tail when span_touch s1 s2 -> loop tail ((Op       Or, span_join s1 s2) :: acc)
     | (Op   Sub, s1) :: (Op    Gt, s2) :: tail when span_touch s1 s2 -> loop tail ((Punc RArrow, span_join s1 s2) :: acc)
-    | (Punc Dot, s1) :: (Punc Dot, s2) :: tail when span_touch s1 s2 -> loop tail ((Punc     DD, span_join s1 s2) :: acc)
+    | (Punc Col, s1) :: (Punc Col, s2) :: tail when span_touch s1 s2 -> loop tail ((Punc     CC, span_join s1 s2) :: acc)
     | head                             :: tail                       -> loop tail (head                           :: acc)
   in loop tokens []
 
@@ -212,7 +213,7 @@ let merge_tokens tokens =
 
 
 let read filename = 
-  if not (Sys.file_exists filename) then err (Msg ("File not found: " ^ filename)) else
+  if not (Sys.file_exists filename) then err (File_not_found filename) else
   In_channel.with_open_text filename In_channel.input_all
 
 let tokenize filename =

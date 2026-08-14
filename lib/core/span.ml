@@ -3,6 +3,7 @@ open Ast
 
 let file_start_line = 1
 let file_start_col  = 1
+let file_start_span = { s_pos = 0; e_pos = 0 }
 
 
 let span_make s_pos e_pos = 
@@ -13,8 +14,11 @@ let span_touch s1 s2 =
   s1.e_pos = s2.s_pos
 let span_join s1 s2 = 
   { s_pos = s1.s_pos; e_pos = s2.e_pos }
+let span_cover s1 s2 =
+  { s_pos = min s1.s_pos s2.s_pos; e_pos = max s1.e_pos s2.e_pos } 
 
-
+let span_start s = span_of_pos s.s_pos
+let span_end   s = span_of_pos s.e_pos
 
 let get_nl_list source =
   let len = String.length source in
