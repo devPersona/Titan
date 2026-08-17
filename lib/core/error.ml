@@ -2,13 +2,18 @@ open Ast
 open Span
 open Debug
 
-let err         kind                   = raise  (Err kind)
-let err_at      kind span nl_list      = err    (Err_at (kind, span, nl_list))
-let err_in_file kind span nl_list file = err_at (Err_in_file (kind, file)) span nl_list
 
-let make_err         kind                   = Err kind
-let make_err_at      kind span nl_list      = Err_at (kind, span, nl_list)
-let make_err_in_file kind span nl_list file = make_err_at (Err_in_file (kind, file)) span nl_list
+let err           kind                   = raise  (Err kind)
+let err_at        kind span nl_list      = err    (Err_at (kind, span, nl_list))
+let err_in_file   kind span nl_list file = err_at (Err_in_file (kind, file)) span nl_list
+let err_in_module kind span (m:module_)  = err_in_file kind span m.newlines (String.concat "/" m.name ^ ".ttn")
+let err_list      errs                   = err    (Err_list errs)
+
+let make_err                kind                   = Err kind
+let make_err_at             kind span nl_list      = Err_at (kind, span, nl_list)
+let make_err_in_file        kind span nl_list file = make_err_at (Err_in_file (kind, file)) span nl_list
+let make_err_in_module      kind span (m:module_)  = make_err_in_file kind span m.newlines (String.concat "/" m.name ^ ".ttn")
+
 
 let rec string_of_err k =
   match k with
@@ -19,7 +24,7 @@ let rec string_of_err k =
   | Expected m            -> "Expected " ^ m
   | Invalid  m            -> "Invalid "  ^ m
   | File_not_found f      -> "File not found: " ^ f
-  | Syntax_err _          -> "Idk2"
+  | Redef_type n          -> "Redefinition of type \"" ^ n ^ "\""
   | _                     -> assert false
 
 let rec handle_err kind =

@@ -94,6 +94,7 @@ type module_ = {
   name:           path;
   imports: import list;
   items:   item   list;
+  newlines: pos   list;
 }
 
 and import = {
@@ -130,7 +131,7 @@ and t =
 | TName     of string * span          (* unresolved                  *)
 | TClass    of string                 (* resolved, class name        *)
 | TTypename of string                 (* resolved, generic type name *)
-| TPath     of path * span * t        (* path..to..Module..Type      *)
+| TPath     of path * t * span        (* path::to::Module::Type      *)
 | TNamed    of placed_name * t        (* a:T                         *)
 | TDefault  of t * expr               (* T = expr                    *)
 | TTuple    of t list                 (* (A, B)                      *)
@@ -243,6 +244,7 @@ and err_kind =
 | Missing        of string
 | Expected       of string
 | Invalid        of string
+| Redef_type     of string
 
 
 exception Err of err_kind

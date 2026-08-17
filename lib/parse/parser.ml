@@ -27,9 +27,10 @@ let add_err      kind span   ctx = ctx.errors <- (Syntax_err (make_err_in_file k
 
 
 
-let path_of_name path ctx = ctx.dir ^ "/" ^ String.concat "/" path ^ ".ttn"
+let path_of_name path = String.concat "/" path ^ ".ttn"
+let real_path_of_name path ctx = ctx.dir ^ "/" ^ path_of_name path
 let file_exists  path ctx =
-  path_of_name path ctx |> Sys.file_exists
+  real_path_of_name path ctx |> Sys.file_exists
 
 
 
@@ -104,7 +105,13 @@ let check_semicol expr tokens ctx =
 
 
 
-
+let remove_comments tokens =
+  let rec loop t acc =
+    match t with
+    | (Comment _, _) :: rest -> loop rest acc
+    | head           :: tail -> loop tail (head :: acc)
+    | []                     -> List.rev acc
+  in loop tokens []
 
 
 
@@ -160,7 +167,7 @@ and parse_type_path dir tokens ctx =
   let span              = span_make s_pos ctx.pos_e in
   let rec wrap typ path = 
     match typ with
-    | TName     _     -> TPath    (path, span, typ)
+    | TName     _     -> TPath    (path, typ, span)
     | TArray    t     -> TArray   (wrap t path )
     | TPtr      t     -> TPtr     (wrap t path )
     | TGeneric (t, a) -> TGeneric (wrap t path, a)
@@ -168,14 +175,14 @@ and parse_type_path dir tokens ctx =
     | TDefault (t, e) -> TDefault (wrap t path, e)
     | TNamed  (n, t)  -> TNamed   (n, wrap t path)
     | TFunc (t1, t2)  -> TFunc    (wrap t1 path, wrap t2 path)
-    | TPath (_, s, _) -> add_err (Msg "Nested paths are not allowed")           s    ctx; TUnknown
+    | TPath (_, _, s) -> add_err (Msg "Nested paths are not allowed")           s    ctx; TUnknown
     | TUnit           -> add_err (Msg "Unit type '()' is not allowed in paths") span ctx; TUnknown
     | _               -> typ
   in
   if file_exists path ctx then wrap typ path, rest else 
     match typ with
-    | TName (name, _) -> let p = path @ [name] in if file_exists p ctx then wrap typ p, rest else err_at_span (File_not_found (path_of_name path ctx)) span ctx
-    | _               -> err_at_span (File_not_found (path_of_name path ctx)) span ctx
+    | TName (name, _) -> let p = path @ [name] in if file_exists p ctx then wrap typ p, rest else err_at_span (File_not_found (real_path_of_name path ctx)) span ctx
+    | _               -> err_at_span (File_not_found (real_path_of_name path ctx)) span ctx
 
 and parse_type_array tokens ctx =
   let typ, rest = parse_type tokens ctx in
@@ -712,18 +719,9 @@ let parse_item tokens ctx =
 
 
 
-
-let rec load_import import ctx =
-  if Hashtbl.mem ctx.tbl import.path then () else
-  let path = path_of_name import.path ctx in
-  if not (Sys.file_exists path) then add_err (File_not_found path) import.span ctx else
-  let tokens, lex_ctx = tokenize path in
-  let m = parse_module tokens (empty_ctx ctx.tbl ctx.dir lex_ctx.filename lex_ctx.newlines) in
-  Hashtbl.add ctx.tbl import.path m;
-  List.iter (fun i -> load_import i ctx) m.imports
   
 
-and parse_import tokens ctx =
+let parse_import tokens ctx =
   let rec loop t acc = 
     match t with
     | (Ident dir, _) :: (Punc CC, _) :: tail -> loop tail (dir :: acc)
@@ -731,22 +729,14 @@ and parse_import tokens ctx =
     | _                                      -> err_at_token (Invalid "import") t ctx
   in loop tokens []
 
-and parse_imports tokens ctx =
+let parse_imports tokens ctx =
   let rec loop t acc =
     match t with
     | (Kw KwImport, s) :: tail -> ctx.pos_s <- s.s_pos; let i, rest = parse_import tail ctx in loop rest (i :: acc)
     | _                        -> List.rev acc, t
   in loop tokens []
 
-and remove_comments tokens =
-  let rec loop t acc =
-    match t with
-    | (Comment _, _) :: rest -> loop rest acc
-    | head           :: tail -> loop tail (head :: acc)
-    | []                     -> List.rev acc
-  in loop tokens []
-
-and parse_module tokens ctx =
+let parse_module tokens ctx =
   print_endline ("Parsing \"" ^ ctx.curr ^ "\"...");
   let clean = remove_comments tokens in
   let imports, rest = parse_imports clean ctx in
@@ -756,21 +746,27 @@ and parse_module tokens ctx =
     | _             -> let item, rest = parse_item t ctx in loop rest (item :: acc)
   in
   let items = loop rest [] in
-  { name = String.split_on_char '/' (ctx.dir ^ (Filename.chop_extension ctx.curr)); imports; items }
+  { name = String.split_on_char '/' (Filename.chop_extension ctx.curr); imports; items; newlines = ctx.newlines }
 
 
+let rec load_import import ctx =
+  if Hashtbl.mem ctx.tbl import.path then () else
+  let path = real_path_of_name import.path ctx in
+  if not (Sys.file_exists path) then add_err (File_not_found path) import.span ctx else
+  let tokens, lex_ctx = tokenize path in
+  let m = parse_module tokens (empty_ctx ctx.tbl ctx.dir (path_of_name import.path) lex_ctx.newlines) in
+  Hashtbl.add ctx.tbl import.path m;
+  List.iter (fun i -> load_import i ctx) m.imports
 
 
-
-
-and parse main = 
+let parse main = 
   let tokens, lexer_ctx = tokenize main in
   let abs  = Unix.realpath    main in
   let dir  = Filename.dirname  abs in
   let curr = Filename.basename abs in
-  let tbl  = Hashtbl.create 8      in
+  let tbl  = Hashtbl.create    8   in
   let ctx  = empty_ctx tbl dir curr lexer_ctx.newlines in
   let m    = parse_module tokens ctx in
-  Hashtbl.add tbl [curr] m;
+  Hashtbl.add tbl [Filename.chop_extension curr] m;
   List.iter (fun i -> load_import i ctx) m.imports;
-  ctx
+  ctx 

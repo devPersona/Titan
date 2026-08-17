@@ -102,21 +102,21 @@ let rec get_ret t =
 
 let rec debug_type t = 
   match t with
-  | TName (n, _) -> "TName \"" ^ n ^ "\""
-  | TClass    n  -> "TClass \"" ^ n ^ "\""
-  | TTypename n  -> "TTypename \"" ^ n ^ "\""
-  | TPath (p, _, t) -> concat ".." p ^ debug_type t
-  | TNamed (n, t) -> n.name ^ ":" ^ debug_type t
+  | TName    (n, _) -> "TName \"" ^ n ^ "\""
+  | TClass    n     -> "TClass \"" ^ n ^ "\""
+  | TTypename n     -> "TTypename \"" ^ n ^ "\""
+  | TPath (p, t, _) -> concat "::" p ^ debug_type t
+  | TNamed   (n, t) -> n.name ^ ":" ^ debug_type t
   | TDefault (t, d) -> debug_type t ^ " = " ^ debug_expr d
-  | TTuple types -> "TTuple(" ^ concat_list ", " debug_type types ^ ")"
-  | TArray t     -> "TArray<" ^ debug_type t ^ ">"
-  | TPtr   t     -> "TPtr<"   ^ debug_type t ^ ">"
+  | TTuple    types -> "TTuple(" ^ concat_list ", " debug_type types ^ ")"
+  | TArray    t     -> "TArray<" ^ debug_type t ^ ">"
+  | TPtr      t     -> "TPtr<"   ^ debug_type t ^ ">"
   | TGeneric (t, g) -> debug_type t ^ "<" ^ concat_list ", " debug_generic_arg g ^ ">"
   | TPoly    (t, g) -> "Poly<" ^ concat_list ", " debug_generic_param g ^ ">(" ^ debug_type t ^ ")"
-  | TFunc (p, r) -> "TFunc(" ^ debug_type p ^ ")->(" ^ debug_type r ^ ")"
-  | TVoid        -> "Void"
-  | TUnit        -> "()"
-  | TUnknown     -> "TUnknown"
+  | TFunc    (p, r) -> "TFunc(" ^ debug_type p ^ ")->(" ^ debug_type r ^ ")"
+  | TVoid           -> "Void"
+  | TUnit           -> "()"
+  | TUnknown        -> "TUnknown"
 
 and debug_expr e =
   let expr = 
