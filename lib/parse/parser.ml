@@ -40,14 +40,14 @@ let ss_pos p ctx =
   fun() -> ctx.pos_s <- old
 
 
-let pack_item  item span                      = { item;       span }
-let pack_mod   m    span                      = { m;          span }
-let pack_name  name span                      = { name;       span }
-let pack_expr  expr span                      = { expr; mods = []; span }
-let pack_param param metadata span:param_info = { param; metadata; span }
-let pack_binop e1 op e2                       = pack_expr (EBinOp (e1, op, e2)) (span_join e1.span e2.span)
-let pack_lunop op e s                         = pack_expr (ELUnOp (op, e     )) (span_join s e.span       )
-let pack_runop e op s                         = pack_expr (ERUnOp (e, op     )) (span_join e.span s       )
+let pack_item  item mods         span = { item; mods;          span }
+let pack_mod   m                 span = { m;                   span }
+let pack_name  name              span = { name;                span }
+let pack_expr  expr              span = { expr; mods = [];     span }
+let pack_param name typ metadata span = { name; typ; metadata; span }
+let pack_binop e1 op e2               = pack_expr (EBinOp (e1, op, e2)) (span_join e1.span e2.span)
+let pack_lunop op e s                 = pack_expr (ELUnOp (op, e     )) (span_join s e.span       )
+let pack_runop e op s                 = pack_expr (ERUnOp (e, op     )) (span_join e.span s       )
 
 let pack_tuple (exprs:expr list) s =
   match exprs with
@@ -59,13 +59,6 @@ let pack_type_tuple types =
   | []  -> TUnit
   | [t] -> t
   | _   -> TTuple types
-
-let type_of_params params = 
-  let rec loop (p:param_info list) acc =
-    match p with
-    | []            -> pack_type_tuple (List.rev acc)
-    | param :: rest -> loop rest (snd (param.param) :: acc)
-  in loop params []
 
 let wrap_expr s func tokens ctx =
   let restore = ss_pos s.s_pos ctx in
@@ -168,9 +161,9 @@ and parse_type_path dir tokens ctx =
   let rec wrap typ path = 
     match typ with
     | TName     _     -> TPath    (path, typ, span)
-    | TArray    t     -> TArray   (wrap t path )
-    | TPtr      t     -> TPtr     (wrap t path )
-    | TGeneric (t, a) -> TGeneric (wrap t path, a)
+    | TArray    t     -> TArray   (wrap t path    )
+    | TPtr      t     -> TPtr     (wrap t path    )
+    | TGeneric (t, a) -> TGeneric (wrap t path, a )
     | TTuple   types  -> TTuple   (List.map (fun t -> wrap t path) types)
     | TDefault (t, e) -> TDefault (wrap t path, e)
     | TNamed  (n, t)  -> TNamed   (n, wrap t path)
@@ -545,9 +538,10 @@ and parse_lambda tokens ctx =
     let params, remaining = parse_params  tail ctx in
     let ret, final        = get_type remaining ctx in
     let body, final'      = if semicol_next final then pack_expr EEmpty (span_of_pos ctx.pos_e), final else parse_expr final ctx in
+    let types = pack_type_tuple (List.map (fun p -> p.typ) params) in
     if generics = [] then
-      pack_expr (ELambda (params, TFunc (type_of_params params, ret), body)) (span_make ctx.pos_s body.span.e_pos), final'
-    else let expr = pack_expr (ELambda (params, TPoly (TFunc (type_of_params params, ret), generics), body)) (span_make ctx.pos_s body.span.e_pos) in
+      pack_expr (ELambda (params, TFunc (types, ret), body)) (span_make ctx.pos_s body.span.e_pos), final'
+    else let expr = pack_expr (ELambda (params, TPoly (TFunc (types, ret), generics), body)) (span_make ctx.pos_s body.span.e_pos) in
       pack_expr (EPoly (expr, generics)) expr.span, final'
   | _ -> err_at_token (Expected "parameter list") tokens ctx
 
@@ -586,7 +580,7 @@ and parse_param tokens ctx =
     match remaining with
     | (Punc Col, _) :: rest -> parse_type rest ctx
     | _                     -> err_at_token (Msg "Implicit parameter types are not allowed") rest ctx
-  in pack_param (name, typ) mods (span_make name.span.e_pos ctx.pos_e), final
+  in pack_param name typ mods (span_make name.span.e_pos ctx.pos_e), final
 
 
 and parse_ret tokens ctx =
@@ -642,7 +636,7 @@ and parse_block tokens ctx =
 
 and parse_stmt mods tokens ctx =
   let expr, rest = parse_expr (consume_semicols tokens) ctx in
-  { stmt = SExpr { expr with mods = expr.mods @ mods }; span = expr.span }, check_semicol expr tokens ctx
+  { stmt = SExpr { expr with mods = expr.mods @ mods }; span = expr.span }, check_semicol expr rest ctx
 
 
 
@@ -685,7 +679,7 @@ and parse_class_body tokens ctx =
     | (Punc LBrace, _) :: tail -> loop tail active_mods (block_mods :: saved_mods) acc 
     | (Punc RBrace, s) :: tail -> begin 
       match saved_mods with
-      | []             -> List.rev acc, s.e_pos, tail
+      | []             -> ctx.pos_e <- s.e_pos; List.rev acc, tail
       | block :: saved -> loop tail block saved acc end
     | _                -> err_at_token (Missing "'}'") tokens ctx
   in loop tokens [] [] [] 
@@ -697,19 +691,21 @@ and parse_class tokens mods ctx =
     | _                       -> err_at_token (Expected "class name") tokens ctx
   in
   let generics, remaining = get_generic_params rest ctx in
-  match remaining with
-  | (Punc SemiCol, _) :: tail -> let e_pos = if generics = [] then name.span.e_pos else ctx.pos_e in pack_item (IClass { name; mods; generics; members = [] }) (span_make ctx.pos_s e_pos), tail
-  | (Punc LBrace,  _) :: tail -> let members, e_pos, rest = parse_class_body tail ctx in pack_item (IClass { name; mods; generics; members }) (span_make ctx.pos_s e_pos), rest
-  | _                         -> err_at_token (Expected "'}'") rest ctx 
-
+  let members, final = 
+    match remaining with
+    | (Punc SemiCol, _) :: tail -> if generics = [] then ctx.pos_e <- name.span.e_pos; [], tail
+    | (Punc LBrace,  _) :: tail -> parse_class_body tail ctx
+    | _                         -> err_at_token (Expected "'}'") rest ctx 
+  in IType { name; kind = TDKClass { generics; members; } }, final
+  
 
 
 
 let parse_item tokens ctx =
   let mods, rest = get_mods tokens ctx in
   match rest with
-  | (Kw KwClass, s) :: tail -> ctx.pos_s <- s.s_pos; parse_class tail mods ctx
-  | _                       -> let stmt, remaining = parse_stmt mods rest ctx in pack_item (IStmt stmt) stmt.span, remaining
+  | (Kw KwClass, s) :: tail -> let item, remaining = parse_class tail mods ctx in pack_item item mods (span_make s.s_pos ctx.pos_e), remaining
+  | _                       -> let stmt, remaining = parse_stmt  mods rest ctx in pack_item (IStmt stmt) mods stmt.span,             remaining
 
 
 

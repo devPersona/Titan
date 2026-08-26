@@ -1,6 +1,23 @@
 type pos  = int (* byte offset *)
 type span = { s_pos: pos; e_pos: pos } 
 
+and err_kind = 
+| Err_list       of err_kind list
+| Syntax_err     of err_kind
+| Err_in_file    of err_kind * string
+| Err_at         of err_kind * span * pos list
+| Msg            of string
+| File_not_found of string
+| Missing        of string
+| Expected       of string
+| Invalid        of string
+| Redef_param    of string
+| Redef_type     of string
+| Undefined      of string
+| Undefined_type of string
+
+exception Err of err_kind
+
 type basic =
 | Int    of int
 | Float  of float
@@ -102,20 +119,21 @@ and import = {
   span: span
 }
 
-and item = { item: item_def; span: span }
+and item = { item: item_def; mods: modifier list; span: span }
 and item_def = 
-| IClass of class_info
-| IStmt  of stmt
+| IType of t_decl_info
+| IStmt of stmt
+
+and t_decl_info = { name: placed_name; kind: t_decl_kind }
+and t_decl_kind =
+| TDKClass of class_info
 
 and class_info = {
-  name:            placed_name;
-  mods:          modifier list;
   generics: generic_param list;
   members:   class_member list;
 }
 
 and class_member = { member: class_member_def; mods: modifier list; span: span; }
-
 and class_member_def = 
 | CMField  of class_field_info
 | CMMethod of class_method_info
@@ -178,13 +196,12 @@ and expr_def =
 | EBlock   of stmt list
 | ETrace   of expr
 
-and param_info = { param: param_def; metadata: modifier list; span: span }
-and param_def  = placed_name * t
+and param_info = { name: placed_name; typ: t; metadata: modifier list; span: span }
 
 and generic_param = { param: generic_param_def; metadata: modifier list; span: span }
 and generic_param_def = 
 | GPTypename of string
-| GPConst    of param_def
+| GPConst    of placed_name * t
 and generic_arg = { arg: generic_arg_def; metadata: modifier list; span: span }
 and generic_arg_def = 
 | GAType of t
@@ -224,27 +241,19 @@ and 'v meta_arg_span = { arg: 'v; span: span }
 
 type parser_ctx = {
   tbl: (path, module_) Hashtbl.t;
-  dir:            string;
-  curr:           string;
-  newlines:     pos list;
-  mutable pos_s:     pos; (* start of position *)
-  mutable pos_e:     pos; (* end   of position *)
-  mutable allow_gt: bool; (* allow '>' to be treated as a binary operator, used for generic args *)
-  mutable errors: err_kind list;
+  dir:                    string;
+  curr:                   string;
+  newlines:             pos list;
+  mutable pos_s:             pos; (* start of position *)
+  mutable pos_e:             pos; (* end   of position *)
+  mutable allow_gt:         bool; (* allow '>' to be treated as a binary operator, used for generic args *)
+  mutable errors:  err_kind list;
 }
 
 
-and err_kind = 
-| Err_list       of err_kind list
-| Syntax_err     of err_kind
-| Err_in_file    of err_kind * string
-| Err_at         of err_kind * span * pos list
-| Msg            of string
-| File_not_found of string
-| Missing        of string
-| Expected       of string
-| Invalid        of string
-| Redef_type     of string
 
-
-exception Err of err_kind
+type t_sig = { name: string; kind: t_sig_kind; mods: modifier list; generics: generic_param list }
+and t_sig_kind = 
+| TSKClass
+| TSKTypename 
+| TSKPrimal

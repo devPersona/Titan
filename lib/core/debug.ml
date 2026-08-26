@@ -147,13 +147,13 @@ and debug_expr e =
   in expr
 
 and debug_param p =
-  concat " " (List.map debug_metadata p.metadata) ^ (fst p.param).name ^ " of " ^ debug_type (snd p.param)
+  concat " " (List.map debug_metadata p.metadata) ^ p.name.name ^ " of " ^ debug_type p.typ
 
 and debug_generic_param g =
   let p = 
     match g.param with
-    | GPConst    e -> "Const: " ^ debug_param {param = e; metadata = g.metadata; span = g.span}
-    | GPTypename n -> "Typename: " ^ n
+    | GPConst (n, t) -> "Const: " ^ n.name ^ " of " ^ debug_type t
+    | GPTypename n   -> "Typename: " ^ n
   in
   concat " " (List.map debug_metadata g.metadata) ^ p
 
@@ -195,13 +195,17 @@ let debug_class_member_def member =
 let debug_class_member (member:class_member) =
   "\t" ^ concat " " (List.map debug_modifier member.mods) ^ debug_class_member_def member.member 
 
-let debug_class (info:class_info) = 
-  "Class " ^ info.name.name ^ " {\n\t" ^ String.concat "\n\t" (List.map debug_class_member info.members) ^ "\n}"
+let debug_class (info:class_info) name = 
+  "Class " ^ name ^ " {\n\t" ^ String.concat "\n\t" (List.map debug_class_member info.members) ^ "\n}"
+
+let debug_type_decl (info:t_decl_info) =
+  match info.kind with
+  | TDKClass c -> debug_class c info.name.name
 
 let debug_item i = 
   match i.item with
-  | IClass info -> debug_class info
-  | IStmt  stmt -> debug_stmt  stmt
+  | IType info -> debug_type_decl info
+  | IStmt stmt -> debug_stmt  stmt
 
 let debug_import i = 
   "Import " ^ String.concat ".." i.path
