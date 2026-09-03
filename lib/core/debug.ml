@@ -163,8 +163,9 @@ and debug_stmt s =
 
 and debug_generic_arg g =
   match g.arg with
-  | GAExpr e -> "Expr " ^ debug_expr e
-  | GAType t -> "Type " ^ debug_type t
+  | GAExpr e     -> "Expr " ^ debug_expr e
+  | GAType t     -> "Type " ^ debug_type t
+  | GAAmb (t, e) -> "Ambiguous (" ^ debug_type t ^ " or " ^ debug_expr e ^ ")"
 
 
 and debug_metadata_arg arg =
@@ -173,12 +174,12 @@ and debug_metadata_arg arg =
   | MAExpr e -> debug_expr e
 
 and debug_metadata m =
-  match m.m with
-  | MMeta (n, args) -> "@" ^ n ^ if args <> [] then "(" ^ (String.concat ", " (List.map debug_metadata_arg args)) ^ ")" else ""
+  match m.modifier with
+  | MMeta (n, args) -> "@" ^ n ^ if args <> [] then "(" ^ (String.concat ", " (List.map (fun a -> debug_metadata_arg a.arg) args)) ^ ")" else ""
   | _               -> assert false
 
 and debug_modifier m = 
-  match m.m with
+  match m.modifier with
   | MPublic  -> "Public"
   | MPrivate -> "Private"
   | MStatic  -> "Static"
@@ -198,14 +199,14 @@ let debug_class_member (member:class_member) =
 let debug_class (info:class_info) name = 
   "Class " ^ name ^ " {\n\t" ^ String.concat "\n\t" (List.map debug_class_member info.members) ^ "\n}"
 
-let debug_type_decl (info:t_decl_info) =
-  match info.kind with
-  | TDKClass c -> debug_class c info.name.name
+let debug_type_decl info =
+  match info.decl with
+  | DClass c -> debug_class c info.name.name
 
 let debug_item i = 
   match i.item with
-  | IType info -> debug_type_decl info
-  | IStmt stmt -> debug_stmt  stmt
+  | IDecl info -> debug_type_decl info
+  | IStmt stmt -> debug_stmt      stmt
 
 let debug_import i = 
   "Import " ^ String.concat ".." i.path

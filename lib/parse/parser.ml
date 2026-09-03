@@ -40,14 +40,14 @@ let ss_pos p ctx =
   fun() -> ctx.pos_s <- old
 
 
-let pack_item  item mods         span = { item; mods;          span }
-let pack_mod   m                 span = { m;                   span }
-let pack_name  name              span = { name;                span }
-let pack_expr  expr              span = { expr; mods = [];     span }
+let pack_item  item mods         span = { item; mods;      span }
+let pack_mod   modifier          span = { modifier;        span }
+let pack_name  name              span = { name;            span }
+let pack_expr  expr              span = { expr; mods = []; span }
 let pack_param name typ metadata span = { name; typ; metadata; span }
 let pack_binop e1 op e2               = pack_expr (EBinOp (e1, op, e2)) (span_join e1.span e2.span)
-let pack_lunop op e s                 = pack_expr (ELUnOp (op, e     )) (span_join s e.span       )
-let pack_runop e op s                 = pack_expr (ERUnOp (e, op     )) (span_join e.span s       )
+let pack_lunop op e              span = pack_expr (ELUnOp (op, e     )) (span_join span e.span    )
+let pack_runop e op              span = pack_expr (ERUnOp (e, op     )) (span_join e.span span    )
 
 let pack_tuple (exprs:expr list) s =
   match exprs with
@@ -232,12 +232,12 @@ and parse_generic_arg_opt tokens ctx =
   | None,                                 Some (t, t_r) -> Some { arg = GAType t; metadata; span = span_make ctx.pos_s ctx.pos_e }, t_r
   | Some ({ expr = EType t; span }, e_r), Some _        -> Some { arg = GAType t; metadata; span                                 }, e_r
   | Some (e,                        e_r), Some (t, t_r) -> 
-    match t_r with
-    | (Op Gt, _) :: _ | (Punc Comma, _) :: _ -> Some { arg = GAType t; metadata; span = span_make ctx.pos_s ctx.pos_e }, t_r
-    | _                                      -> 
-      match e_r with
-      | (Op Gt, _) :: _ | (Punc Comma, _) :: _ -> Some { arg = GAExpr e; metadata; span = e.span }, e_r
-      | _                                      -> None, tokens
+    match t_r, e_r with
+    | (Op   Gt,    _) :: _,     (Op   Gt,    _) :: _
+    | (Punc Comma, _) :: _,     (Punc Comma, _) :: _    -> Some { arg = GAAmb (t, e); metadata; span = e.span                        }, t_r
+    | (Op Gt,      _) :: _, _ | (Punc Comma, _) :: _, _ -> Some { arg = GAType t;     metadata; span = span_make ctx.pos_s ctx.pos_e }, t_r
+    | _, (Op Gt,   _) :: _ | _, (Punc Comma, _) :: _    -> Some { arg = GAExpr e;     metadata; span = e.span                        }, e_r
+    | _                                                 -> None, tokens
 
 and parse_generic_arg tokens ctx =
   match parse_generic_arg_opt tokens ctx with
@@ -288,10 +288,10 @@ and parse_generic_params tokens ctx =
 
 and parse_meta_arg tokens ctx =
   try
-    let expr, rest = parse_expr tokens ctx in MAExpr expr, rest
+    let expr, rest = parse_expr tokens ctx in { arg = MAExpr expr; span = expr.span}, rest
   with Err _ -> 
     match tokens with
-    | (Op op, _) :: rest -> MAOp op, rest
+    | (Op op, s) :: rest -> { arg = MAOp op; span = s }, rest
     | _                  -> err_at_token (Invalid "metadata argument") tokens ctx
 and parse_meta_args tokens ctx =
   let rec loop t acc =
@@ -538,7 +538,7 @@ and parse_lambda tokens ctx =
     let params, remaining = parse_params  tail ctx in
     let ret, final        = get_type remaining ctx in
     let body, final'      = if semicol_next final then pack_expr EEmpty (span_of_pos ctx.pos_e), final else parse_expr final ctx in
-    let types = pack_type_tuple (List.map (fun p -> p.typ) params) in
+    let types = pack_type_tuple (List.map (fun (p:param_info) -> p.typ) params) in
     if generics = [] then
       pack_expr (ELambda (params, TFunc (types, ret), body)) (span_make ctx.pos_s body.span.e_pos), final'
     else let expr = pack_expr (ELambda (params, TPoly (TFunc (types, ret), generics), body)) (span_make ctx.pos_s body.span.e_pos) in
@@ -696,7 +696,7 @@ and parse_class tokens mods ctx =
     | (Punc SemiCol, _) :: tail -> if generics = [] then ctx.pos_e <- name.span.e_pos; [], tail
     | (Punc LBrace,  _) :: tail -> parse_class_body tail ctx
     | _                         -> err_at_token (Expected "'}'") rest ctx 
-  in IType { name; kind = TDKClass { generics; members; } }, final
+  in IDecl { name; decl = DClass { generics; members; } }, final
   
 
 

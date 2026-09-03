@@ -3,7 +3,7 @@ type span = { s_pos: pos; e_pos: pos }
 
 and err_kind = 
 | Err_list       of err_kind list
-| Syntax_err     of err_kind
+| Syntax_err     of err_kind 
 | Err_in_file    of err_kind * string
 | Err_at         of err_kind * span * pos list
 | Msg            of string
@@ -11,8 +11,9 @@ and err_kind =
 | Missing        of string
 | Expected       of string
 | Invalid        of string
-| Redef_param    of string
+| Redef          of string
 | Redef_type     of string
+| Redef_param    of string
 | Undefined      of string
 | Undefined_type of string
 
@@ -107,45 +108,10 @@ type lexer_ctx = {
 type path = string list
 type placed_name = { name: string; span: span }
 
-type module_ = {
-  name:           path;
-  imports: import list;
-  items:   item   list;
-  newlines: pos   list;
-}
-
-and import = {
-  path: path;
-  span: span
-}
-
-and item = { item: item_def; mods: modifier list; span: span }
-and item_def = 
-| IType of t_decl_info
-| IStmt of stmt
-
-and t_decl_info = { name: placed_name; kind: t_decl_kind }
-and t_decl_kind =
-| TDKClass of class_info
-
-and class_info = {
-  generics: generic_param list;
-  members:   class_member list;
-}
-
-and class_member = { member: class_member_def; mods: modifier list; span: span; }
-and class_member_def = 
-| CMField  of class_field_info
-| CMMethod of class_method_info
-| CMNew    of class_constructor_info
-and class_field_info       = { name: placed_name; generics: generic_param list;                          typ: t; default: expr }
-and class_method_info      = { name: placed_name; generics: generic_param list; params: param_info list; typ: t; body:    expr }
-and class_constructor_info = {                                                  params: param_info list; typ: t; body:    expr }
 
 
 
-
-and t = 
+type t = 
 | TName     of string * span          (* unresolved                  *)
 | TClass    of string                 (* resolved, class name        *)
 | TTypename of string                 (* resolved, generic type name *)
@@ -158,56 +124,55 @@ and t =
 | TGeneric  of t * generic_arg   list (* A<B>                        *)
 | TPoly     of t * generic_param list (* generic type declaration    *)
 | TFunc     of t * t                  (* A->B                        *)
-| TVoid  
+| TVoid      
 | TUnit                               (* for empty tuples '()'       *)
 | TUnknown                            (* uninferred type             *)
 
 
 
-
-
-and stmt = { stmt: stmt_def; span: span }
-and stmt_def =
-| SExpr of expr
-
 and expr = { expr: expr_def; mods: modifier list; span: span }
 and expr_def =
-| EEmpty 
+| EEmpty
 | ELit     of basic
 | EVar     of string
 | EThis
 | EBinOp   of expr * op   * expr
 | ELUnOp   of op   * expr
-| ERUnOp   of expr * op 
+| ERUnOp   of expr * op
 | EArray   of expr list
 | ETuple   of expr list
 | EIf      of expr * expr * expr
 | ECall    of expr * expr
-| EAddress of expr
 | EField   of expr * expr
 | EIndex   of expr * expr
 | EGeneric of expr * generic_arg list
+| EAddress of expr
 | ENew     of expr
 | EDecl    of placed_name * t * expr
 | ELambda  of param_info list * t * expr
 | EReturn  of expr
 | EPoly    of expr * generic_param list
-| EType    of t 
+| EType    of t
 | EBlock   of stmt list
 | ETrace   of expr
+
+and stmt = { stmt: stmt_def; span: span }
+and stmt_def =
+| SExpr of expr
 
 and param_info = { name: placed_name; typ: t; metadata: modifier list; span: span }
 
 and generic_param = { param: generic_param_def; metadata: modifier list; span: span }
-and generic_param_def = 
+and generic_param_def =
 | GPTypename of string
 | GPConst    of placed_name * t
 and generic_arg = { arg: generic_arg_def; metadata: modifier list; span: span }
 and generic_arg_def = 
 | GAType of t
 | GAExpr of expr
+| GAAmb  of t * expr (* ambiguous generic argument, e.g. `x<T>`, T can be either a type or an expression depending on context *)
 
-and modifier = { m: modifier_def; span: span }
+and modifier = { modifier: modifier_def; span: span }
 and modifier_def =
 | MPublic
 | MPrivate
@@ -215,14 +180,14 @@ and modifier_def =
 | MInline
 | MExtern
 (* metadata *)
-| MMeta   of string *  meta_arg list
+| MMeta   of string *  meta_arg meta_arg_span list
 | MSet    of string    meta_arg_span                           (* setter referencing a field,            on class methods            *)
 | MGet    of string    meta_arg_span                           (* getter referencing a field,            on class methods            *)
 | MProp   of meta_prop meta_arg_span * meta_prop meta_arg_span (* (get, set) field property,             on class fields             *)
 | MOp     of meta_op   meta_arg_span                           (* operation overload,                    on class methods            *)
 | MConst                                                       (* marks a variable as constant,          on declarations             *)
 | MHide                                                        (* hides variable from IDE auto-complete, on declarations and classes *)
-| MCopy
+| MCopy                                                        (* creates a copy of any expression,      on expressions              *)
 and meta_arg = (* general unchecked metadata argument *)
 | MAExpr of expr
 | MAOp   of op
@@ -236,6 +201,57 @@ and meta_op =
 | MOExpr of expr
 | MOOp   of op
 and 'v meta_arg_span = { arg: 'v; span: span }
+
+type class_info = {
+  generics: generic_param list;
+  members:  class_member  list;
+}
+and class_member = { member: class_member_def; mods: modifier list; span: span; }
+and class_member_def = 
+| CMField  of class_field_info
+| CMMethod of class_method_info
+| CMNew    of class_constructor_info
+and class_field_info       = { name: placed_name; generics: generic_param list;                          typ: t; default: expr }
+and class_method_info      = { name: placed_name; generics: generic_param list; params: param_info list; typ: t; body:    expr }
+and class_constructor_info = {                                                  params: param_info list;         body:    expr }
+
+type decl_info = { name: placed_name; decl: decl_def }
+and decl_def =
+| DClass of class_info
+
+type item = { item: item_def; mods: modifier list; span: span }
+and item_def = 
+| IDecl of decl_info
+| IStmt of stmt
+
+type import = {
+  path: path;
+  span: span
+}
+type module_ = {
+  name:           path;
+  imports: import list;
+  items:   item   list;
+  newlines: pos   list;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
