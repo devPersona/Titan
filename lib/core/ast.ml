@@ -76,6 +76,7 @@ type kw =
 | KwIf     
 | KwElse   
 | KwClass  
+| KwAlias
 | KwPublic 
 | KwPrivate
 | KwStatic 
@@ -113,20 +114,17 @@ type placed_name = { name: string; span: span }
 
 type t = 
 | TName     of string * span          (* unresolved                  *)
-| TClass    of string                 (* resolved, class name        *)
-| TTypename of string                 (* resolved, generic type name *)
-| TPath     of path * t * span        (* path::to::Module::Type      *)
 | TNamed    of placed_name * t        (* a:T                         *)
 | TDefault  of t * expr               (* T = expr                    *)
 | TTuple    of t list                 (* (A, B)                      *)
-| TArray    of t                      (* [T] or Array<T>             *)
-| TPtr      of t                      (* T*  or Ptr<T>               *)
 | TGeneric  of t * generic_arg   list (* A<B>                        *)
 | TPoly     of t * generic_param list (* generic type declaration    *)
 | TFunc     of t * t                  (* A->B                        *)
-| TVoid      
 | TUnit                               (* for empty tuples '()'       *)
 | TUnknown                            (* uninferred type             *)
+| TID       of t_id                   (* resolved type               *)
+| TAmb      of t_id list              (* ambiguous overload          *)
+| TTypename of t_id
 
 
 
@@ -156,16 +154,18 @@ and expr_def =
 | EBlock   of stmt list
 | ETrace   of expr
 
-and stmt = { stmt: stmt_def; span: span }
-and stmt_def =
-| SExpr of expr
-
 and param_info = { name: placed_name; typ: t; metadata: modifier list; span: span }
 
+and t_id = int
 and generic_param = { param: generic_param_def; metadata: modifier list; span: span }
 and generic_param_def =
-| GPTypename of string
-| GPConst    of placed_name * t
+| GPName       of placed_name
+| GPConst      of placed_name * t
+| GPType       of t
+| GPTypename   of t_id
+| GPGeneric    of generic_param * generic_param list
+| GPTuple      of generic_param list
+| GPFunc       of generic_param * generic_param
 and generic_arg = { arg: generic_arg_def; metadata: modifier list; span: span }
 and generic_arg_def = 
 | GAType of t
@@ -180,14 +180,15 @@ and modifier_def =
 | MInline
 | MExtern
 (* metadata *)
-| MMeta   of string *  meta_arg meta_arg_span list
-| MSet    of string    meta_arg_span                           (* setter referencing a field,            on class methods            *)
-| MGet    of string    meta_arg_span                           (* getter referencing a field,            on class methods            *)
-| MProp   of meta_prop meta_arg_span * meta_prop meta_arg_span (* (get, set) field property,             on class fields             *)
-| MOp     of meta_op   meta_arg_span                           (* operation overload,                    on class methods            *)
-| MConst                                                       (* marks a variable as constant,          on declarations             *)
-| MHide                                                        (* hides variable from IDE auto-complete, on declarations and classes *)
-| MCopy                                                        (* creates a copy of any expression,      on expressions              *)
+| MMeta   of string *  meta_arg meta_arg_span list             (* unchecked metadata                                                              *)
+| MSet    of string    meta_arg_span                           (* setter referencing a field,                         on class methods            *)
+| MGet    of string    meta_arg_span                           (* getter referencing a field,                         on class methods            *)
+| MProp   of meta_prop meta_arg_span * meta_prop meta_arg_span (* (get, set) field property,                          on class fields             *)
+| MOp     of meta_op   meta_arg_span                           (* operation overload,                                 on class methods            *)
+| MConst                                                       (* marks a variable as constant,                       on declarations             *)
+| MHide                                                        (* hides variable from IDE auto-complete,              on all declarations         *)
+| MCopy                                                        (* creates a copy of any expression,                   on expressions              *)
+| MUsing  of string    meta_arg_span list                      (* specifies existing symbols at generic declarations, on item declarations        *)
 and meta_arg = (* general unchecked metadata argument *)
 | MAExpr of expr
 | MAOp   of op
@@ -202,6 +203,12 @@ and meta_op =
 | MOOp   of op
 and 'v meta_arg_span = { arg: 'v; span: span }
 
+
+and stmt = { stmt: stmt_def; span: span }
+and stmt_def =
+| SExpr of expr (* why do i even have statements? *)
+
+
 type class_info = {
   generics: generic_param list;
   members:  class_member  list;
@@ -215,9 +222,13 @@ and class_field_info       = { name: placed_name; generics: generic_param list; 
 and class_method_info      = { name: placed_name; generics: generic_param list; params: param_info list; typ: t; body:    expr }
 and class_constructor_info = {                                                  params: param_info list;         body:    expr }
 
+
+type alias_info = { target: t; generics: generic_param list; }
+
 type decl_info = { name: placed_name; decl: decl_def }
 and decl_def =
 | DClass of class_info
+| DAlias of alias_info
 
 type item = { item: item_def; mods: modifier list; span: span }
 and item_def = 
@@ -267,9 +278,32 @@ type parser_ctx = {
 }
 
 
-
-type t_sig = { name: string; kind: t_sig_kind; mods: modifier list; generics: generic_param list }
+type t_sig = {
+  id:                   t_id;
+  name:               string;
+  m_path:               path;
+  decl_span:            span;
+  params: generic_param list;
+  mutable kind:   t_sig_kind;
+}
 and t_sig_kind = 
 | TSKClass
-| TSKTypename 
-| TSKPrimal
+| TSKAlias of t
+| TSKParam of param_sig_kind 
+and param_sig_kind = 
+| PSKTypename 
+| PSKGeneric of param_view list
+and param_view =
+| PVConst
+| PVType
+type resolve_env = { mutable vars: string list; parent: resolve_env option }
+type resolve_ctx = {
+  modules: (path,    module_) Hashtbl.t;
+  types:   (t_id,      t_sig) Hashtbl.t;
+  decls:   (path, t_sig list) Hashtbl.t;
+  mutable local:             t_sig list;
+  mutable curr:                 module_;
+  mutable env:              resolve_env;
+  mutable field_access:            bool;
+  mutable errors:         err_kind list;
+}

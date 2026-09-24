@@ -54,6 +54,7 @@ let debug_kw kw =
   | KwIf      -> "If"
   | KwElse    -> "Else"
   | KwClass   -> "Class"
+  | KwAlias   -> "Alias"
   | KwPublic  -> "Public"
   | KwPrivate -> "Private"
   | KwStatic  -> "Static"
@@ -103,18 +104,15 @@ let rec get_ret t =
 let rec debug_type t = 
   match t with
   | TName    (n, _) -> "TName \"" ^ n ^ "\""
-  | TClass    n     -> "TClass \"" ^ n ^ "\""
-  | TTypename n     -> "TTypename \"" ^ n ^ "\""
-  | TPath (p, t, _) -> concat "::" p ^ debug_type t
+  | TID       id    -> "TID " ^ (string_of_int id)
+  | TTypename id    -> "TTypename " ^ (string_of_int id)
+  | TAmb      ids   -> "TAmb [" ^ (ids |> concat_list ", " string_of_int) ^ "]"
   | TNamed   (n, t) -> n.name ^ ":" ^ debug_type t
   | TDefault (t, d) -> debug_type t ^ " = " ^ debug_expr d
   | TTuple    types -> "TTuple(" ^ concat_list ", " debug_type types ^ ")"
-  | TArray    t     -> "TArray<" ^ debug_type t ^ ">"
-  | TPtr      t     -> "TPtr<"   ^ debug_type t ^ ">"
   | TGeneric (t, g) -> debug_type t ^ "<" ^ concat_list ", " debug_generic_arg g ^ ">"
   | TPoly    (t, g) -> "Poly<" ^ concat_list ", " debug_generic_param g ^ ">(" ^ debug_type t ^ ")"
   | TFunc    (p, r) -> "TFunc(" ^ debug_type p ^ ")->(" ^ debug_type r ^ ")"
-  | TVoid           -> "Void"
   | TUnit           -> "()"
   | TUnknown        -> "TUnknown"
 
@@ -152,8 +150,13 @@ and debug_param p =
 and debug_generic_param g =
   let p = 
     match g.param with
-    | GPConst (n, t) -> "Const: " ^ n.name ^ " of " ^ debug_type t
-    | GPTypename n   -> "Typename: " ^ n
+    | GPName n         -> "Name: "     ^ n.name
+    | GPConst (n, t)   -> "Const: "    ^ n.name ^ " of " ^ debug_type t
+    | GPFunc (a, r)    -> "Func: "     ^ debug_generic_param a ^ "->" ^ debug_generic_param r
+    | GPTuple params   -> "Tuple: ("   ^ concat_list ", " debug_generic_param params ^ ")"
+    | GPGeneric (g, p) -> "Generic: "  ^ debug_generic_param g ^ "<" ^ concat_list ", " debug_generic_param p ^ ">"
+    | GPTypename id    -> "Typename: " ^ string_of_int id
+    | GPType _         -> assert false
   in
   concat " " (List.map debug_metadata g.metadata) ^ p
 
@@ -202,6 +205,7 @@ let debug_class (info:class_info) name =
 let debug_type_decl info =
   match info.decl with
   | DClass c -> debug_class c info.name.name
+  | DAlias a -> "Alias " ^ info.name.name ^ (if a.generics = [] then "" else "<" ^ concat_list ", " debug_generic_param a.generics ^ ">") ^ " = " ^ debug_type a.target
 
 let debug_item i = 
   match i.item with

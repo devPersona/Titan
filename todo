@@ -1,0 +1,222 @@
+already established: @:op(+), @:const, @:prop(get, set), @:get(field), @:set(feild), @:hide
+
+@:capture for lambda captures. default captures all as references, e.g.
+    var lambda:()->Int;
+    {
+        var x = 0;
+        lambda = function() return x; // captured by reference
+    } // lambda outlives x
+    lambda(); // UB
+
+
+    now
+    {
+        var x = 0;
+        lambda = @:capture(x) function() return x; // captured by value
+    }
+    lambda(); // return 0;
+
+    var y = 0;
+    var z = 0;
+    var lambda0 =                  function() return y + z; // captures all by reference
+    var lambda1 = @:capture(&y)    function() return y + z; // error: undefined identifier z
+    var lambda2 = @:capture        function() return y + z; // captures nothing
+    var lambda3 = @:capture(y, &z) function() return y + z; // captures y by value and z by reference
+    var lambda4 = @:capture(&, z)  function() return y + z; // captures everything by reference, but z by value
+
+
+    C++ generation:
+    // maps 1:1
+    auto lambda0 = [&]    (){ return y + z; };
+    auto lambda1 = [&y]   (){ return y + z; };
+    auto lambda2 = []     (){ return y + z; };
+    auto lambda3 = [y, &z](){ return y + z; };
+    auto lambda4 = [&, z] (){ return y + z; };
+
+    arguments:
+    - &:    everything by reference, already the default, can be overwritten
+    - =:    everything by value, can be overwritten
+    - &v:   capture v by reference
+    - v:    capture v by value
+    - none: captures nothing
+
+
+
+@:comptime for compile time constants, mostly for NTTPs. replaced by their value at generation, e.g.
+    var x = 5;
+    var arr:FixedArray<Int, x>; // error: x is a runtime value
+
+    now
+    @:comptime var x = 5;
+    var arr:FixedArray<Int, x>; // fine
+    x = 1; // error
+
+    C++ generation:
+    int arr[5]; // replacing x
+
+    no arguments
+
+    note: mirrors the primary function of C++ constexpr 
+
+
+
+@:usingTypes to specify access to real types within type parameters, e.g.
+    class Array<T> {} // T is a typename
+    class Array<Ptr<T>> {} // Ptr is also a typename, expecting 1 type argument, can't access outside types
+
+    now
+    @:usingTypes(Ptr)       class Array<Ptr<T>>         {} // becomes a pattern, Ptr refers to its type. This overload is used when there is a array of pointers
+    @:usingTypes            class Array<Buffer<Ptr<T>>> {} // instead of @:usingTypes(Ptr, Buffer), has access to all types, T is undefined elsewhere so it is seen as a typename
+    @:usingTypes(Undefined) class Array<Undefined>      {} // error
+
+    C++ generation: generates 1:1 using type template overloading
+
+    arguments:
+    - none:  includes all types
+    - types: only names
+
+    note: NTTPs are not affected as they have access to all types already and cannot define new parameters
+
+
+
+@:deduced for generic params, e.g.
+    class FixedArray<T, SIZE:Int> {}
+    class Other<T, SIZE:Int, arr:FixedArray<T, SIZE:Int>> {}
+    
+    // has to be used like
+    @:comptime var arr = [0, 1, 2];
+    var other:Other<Int, 3, arr>;
+
+    now
+    // with deduced
+    class Other<@:deduced T, @:deduced SIZE:Int, arr:FixedArray<T, SIZE:Int>> {} // tells the resolver to not store it in the param list
+    var other:Other<arr>; // T and SIZE are inferred
+
+    class Array<@:deduced T> {}
+    var arr:Array<Int>; // error
+
+    C++ generation: generates 1:1 using type template overloading
+
+    no arguments
+
+
+
+@:requires for generic param requirenments
+    class Buffer<T, SIZE:Int> {} // for small buffers
+
+    var x:Buffer<Int, 8>;
+    var x:Buffer<Int, 128>; // same buffer, same treatment
+
+    now
+    class Buffer<T, SIZE:Int> @:requires(SIZE > 0 && SIZE <= 16)  {} // for smaller buffers
+    class Buffer<T, SIZE:Int> @:requires(SIZE > 16)               {} // for bigger buffers
+
+    var x:Buffer<Int, 8>;  // small buffer
+    var x:Buffer<Int, 64>; // big buffer
+
+    C++ generation: generates 1:1 to simple uses of the C++ requires keyword
+
+    arguments: strictly 1 expression, preferably logic gates
+
+
+
+@:primal to mark built-in types and disallow duplicated declarations and overloads for a specific type
+    // in std
+    class Int {}
+    class Float {}
+
+    // in user created module
+    class Int {} // allowed
+    class Float {}
+
+    now
+    // in std
+    @:primal class Int {}
+    @:primal class Float {}
+
+    // in user created module
+    class Int {} // error: duplicated definition of primal type
+    @:primal class Float {} // same error from std module and this one
+
+    C++ generation: none, compile time only
+
+    no arguments
+
+    note: can also be used to disallow duplicated definition of a user defined type across the whole project
+
+
+
+
+@:destructor, mimics C++ ~T method
+    class SmartPtr<T> { /* ... */ }
+
+    {
+        var ptr:SmartPtr<Int> = Mem.malloc(64);
+    } // memory leak
+
+    now
+    class SmartPtr<T> {
+        // ...
+        @:destructor inline function destroy() free(this);
+    }
+
+    {
+        var ptr:SmartPtr<Int> = Mem.malloc(64);
+    } // calls destroy
+
+    C++ generation: generates 1:1 using C++ destructors
+
+    no arguments
+
+
+
+
+@:copy for copying an expression before using it
+    var vec = Vec3(0, 0, 0);
+    var other = vec;
+
+    other.x = 330; // also modifies vec.x
+
+    now
+    var vec = Vec3(0, 0, 0);
+    var other = @:copy vec;
+
+    other.x = 330; // does not modify vec
+
+    // we can also do
+    var other = vec.copy();
+    var other = Vec3(vec);
+
+    C++ generation: calls the type's copy constructor
+
+    no arguments 
+
+
+
+@:bitfield for flag enums
+    enum Flags {
+        FLAG0 = 0x0   // each one has to be explicitly assigned
+        FLAG1 = 0x1
+        FLAG2 = 0x2
+        FLAG3 = 0x4
+        FLAG4 = 0x8
+        FLAG5 = 0x10
+        FLAG6 = 0x20
+        FLAG7 = 0x40
+    }
+
+    now
+    @:bitfield enum Flags { // starts counting in power of 2
+        FLAG0; // 0x0
+        FLAG1; // 0x1
+        FLAG2; // 0x2
+        FLAG3; // 0x4
+        FLAG4; // 0x8
+        FLAG5; // 0x10
+        FLAG6 = 0x80
+        FLAG7; // 0x100 continues from last
+    }
+
+    C++ generation: generates an enum with those values
+
+    no arguments

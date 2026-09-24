@@ -1,0 +1,9 @@
+@:primal class Void                    {}
+@:primal class Int                     {}
+@:primal class Float                   {}
+@:primal class Bool                    {}
+@:primal class Char                    {}
+@:primal class String                  {}
+@:primal class Ptr<T>                  {}
+@:primal class Array<T>                {}
+@:primal class FixedArray<T, Size:Int> {}

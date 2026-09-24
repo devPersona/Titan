@@ -54,6 +54,7 @@ let kw_list = [
   ("if",       KwIf     );
   ("else",     KwElse   );
   ("class",    KwClass  );
+  ("alias",    KwAlias  );
   ("public",   KwPublic );
   ("private",  KwPrivate);
   ("static",   KwStatic );
