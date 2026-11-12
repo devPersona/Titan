@@ -31,3 +31,10 @@ let get_std_id name =
   | "Array"      -> arrayID
   | "FixedArray" -> fixedArrID
   | _            -> new_id()
+
+let comptime_allowed = [
+  intID;
+  boolID;
+  charID;
+  fixedArrID;
+]

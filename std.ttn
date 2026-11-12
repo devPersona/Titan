@@ -1,5 +1,6 @@
 @:primal class Void                    {}
 @:primal class Int                     {}
+@:primal class SizeT                   {}
 @:primal class Float                   {}
 @:primal class Bool                    {}
 @:primal class Char                    {}

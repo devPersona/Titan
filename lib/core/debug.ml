@@ -25,18 +25,20 @@ let debug_op op =
   | Mul -> "*"
   | Div -> "/"
   | Asg -> "="
-  | AA  -> "+="
-  | SA  -> "-="
-  | MA  -> "*="
-  | DA  -> "/="
+  | AAdd  -> "+="
+  | ASub  -> "-="
+  | AMul  -> "*="
+  | ADiv  -> "/="
   | Eq  -> "=="
   | Neq -> "!="
   | Gt  -> ">"
   | Ge  -> ">="
   | Lt  -> "<"
   | Le  -> "<="
-  | Inc -> "++"
-  | Dec -> "--"
+  | LInc -> "++"
+  | LDec -> "--"
+  | RInc -> "++"
+  | RDec -> "--"
   | Not -> "!"
   | And -> "&&"
   | Or  -> "||"
@@ -105,7 +107,6 @@ let rec debug_type t =
   match t with
   | TName    (n, _) -> "TName \"" ^ n ^ "\""
   | TID       id    -> "TID " ^ (string_of_int id)
-  | TTypename id    -> "TTypename " ^ (string_of_int id)
   | TAmb      ids   -> "TAmb [" ^ (ids |> concat_list ", " string_of_int) ^ "]"
   | TNamed   (n, t) -> n.name ^ ":" ^ debug_type t
   | TDefault (t, d) -> debug_type t ^ " = " ^ debug_expr d
@@ -115,6 +116,7 @@ let rec debug_type t =
   | TFunc    (p, r) -> "TFunc(" ^ debug_type p ^ ")->(" ^ debug_type r ^ ")"
   | TUnit           -> "()"
   | TUnknown        -> "TUnknown"
+  | _ -> assert false
 
 and debug_expr e =
   let expr = 
@@ -169,6 +171,7 @@ and debug_generic_arg g =
   | GAExpr e     -> "Expr " ^ debug_expr e
   | GAType t     -> "Type " ^ debug_type t
   | GAAmb (t, e) -> "Ambiguous (" ^ debug_type t ^ " or " ^ debug_expr e ^ ")"
+  | _ -> assert false
 
 
 and debug_metadata_arg arg =

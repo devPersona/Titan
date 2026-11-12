@@ -194,15 +194,15 @@ let merge_tokens tokens =
   let rec loop t acc =
     match t with
     | []                                                             -> List.rev acc
-    | (Op   Add, s1) :: (Op   Asg, s2) :: tail when span_touch s1 s2 -> loop tail ((Op       AA, span_join s1 s2) :: acc)
-    | (Op   Sub, s1) :: (Op   Asg, s2) :: tail when span_touch s1 s2 -> loop tail ((Op       SA, span_join s1 s2) :: acc)
-    | (Op   Mul, s1) :: (Op   Asg, s2) :: tail when span_touch s1 s2 -> loop tail ((Op       MA, span_join s1 s2) :: acc)
-    | (Op   Div, s1) :: (Op   Asg, s2) :: tail when span_touch s1 s2 -> loop tail ((Op       DA, span_join s1 s2) :: acc)
+    | (Op   Add, s1) :: (Op   Asg, s2) :: tail when span_touch s1 s2 -> loop tail ((Op     AAdd, span_join s1 s2) :: acc)
+    | (Op   Sub, s1) :: (Op   Asg, s2) :: tail when span_touch s1 s2 -> loop tail ((Op     ASub, span_join s1 s2) :: acc)
+    | (Op   Mul, s1) :: (Op   Asg, s2) :: tail when span_touch s1 s2 -> loop tail ((Op     AMul, span_join s1 s2) :: acc)
+    | (Op   Div, s1) :: (Op   Asg, s2) :: tail when span_touch s1 s2 -> loop tail ((Op     ADiv, span_join s1 s2) :: acc)
     | (Op   Asg, s1) :: (Op   Asg, s2) :: tail when span_touch s1 s2 -> loop tail ((Op       Eq, span_join s1 s2) :: acc)
     | (Op    Gt, s1) :: (Op   Asg, s2) :: tail when span_touch s1 s2 -> loop tail ((Op       Ge, span_join s1 s2) :: acc)
     | (Op    Lt, s1) :: (Op   Asg, s2) :: tail when span_touch s1 s2 -> loop tail ((Op       Le, span_join s1 s2) :: acc)
-    | (Op   Add, s1) :: (Op   Add, s2) :: tail when span_touch s1 s2 -> loop tail ((Op      Inc, span_join s1 s2) :: acc)
-    | (Op   Sub, s1) :: (Op   Sub, s2) :: tail when span_touch s1 s2 -> loop tail ((Op      Dec, span_join s1 s2) :: acc)
+    | (Op   Add, s1) :: (Op   Add, s2) :: tail when span_touch s1 s2 -> loop tail ((Op     LInc, span_join s1 s2) :: acc)
+    | (Op   Sub, s1) :: (Op   Sub, s2) :: tail when span_touch s1 s2 -> loop tail ((Op     LInc, span_join s1 s2) :: acc)
     | (Op   Not, s1) :: (Op   Asg, s2) :: tail when span_touch s1 s2 -> loop tail ((Op      Neq, span_join s1 s2) :: acc)
     | (Op   Amp, s1) :: (Op   Amp, s2) :: tail when span_touch s1 s2 -> loop tail ((Op      And, span_join s1 s2) :: acc)
     | (Op   Pip, s1) :: (Op   Pip, s2) :: tail when span_touch s1 s2 -> loop tail ((Op       Or, span_join s1 s2) :: acc)

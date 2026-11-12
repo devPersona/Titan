@@ -9,7 +9,7 @@ namespace ttn {
     // Tuple def
     template<typename T>
     struct tuple<T> {
-        static constexpr size_t size = 1;
+        static constexpr size_t length = 1;
         T v;
 
         tuple(const T& v): v(v) {}
@@ -18,24 +18,23 @@ namespace ttn {
         template<size_t N> requires(N == 0) const T& get() const { return v; }
         template<size_t N> requires(N == 0)       T& get()       { return v; }
 
-        
         const String toString() const { return __to_string(v); }
     };
 
     template<typename T, typename ...Rest>
     struct tuple<T, Rest...> {
-        static constexpr size_t size = 1 + tuple<Rest...>::size;
+        static constexpr size_t length = 1 + tuple<Rest...>::length;
         T v;
         tuple<Rest...> rest;
 
+        tuple(const T& v, const tuple<Rest...>& rest): v(v), rest(rest) {}
         tuple(const T& v, const Rest&... args): v(v), rest(args...) {}
         tuple(): v(T()), rest() {}
 
-        template<size_t N> requires(N >  0 && N < size) const auto& get() const { return rest.template get<N - 1>(); }
-        template<size_t N> requires(N >  0 && N < size)       auto& get()       { return rest.template get<N - 1>(); }
-        template<size_t N> requires(N == 0)             const T&    get() const { return v;                          }
-        template<size_t N> requires(N == 0)                   T&    get()       { return v;                          }
-        
+        template<size_t N> requires(N >  0 && N < length) const auto& get() const { return rest.template get<N - 1>(); }
+        template<size_t N> requires(N == 0              ) const auto& get() const { return v;                          }
+        template<size_t N> requires(N >  0 && N < length)       auto& get()       { return rest.template get<N - 1>(); }
+        template<size_t N> requires(N == 0              )       auto& get()       { return v;                          }
         
         const String toString() const { return __to_string(v) + ", " + rest.toString(); }
     };

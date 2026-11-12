@@ -9,10 +9,10 @@ let err_in_file   kind span nl_list file = err_at (Err_in_file (kind, file)) spa
 let err_in_module kind span (m:module_)  = err_in_file kind span m.newlines (String.concat "/" m.name ^ ".ttn")
 let err_list      errs                   = err    (Err_list errs)
 
-let make_err                kind                   = Err kind
-let make_err_at             kind span nl_list      = Err_at (kind, span, nl_list)
-let make_err_in_file        kind span nl_list file = make_err_at (Err_in_file (kind, file)) span nl_list
-let make_err_in_module      kind span (m:module_)  = make_err_in_file kind span m.newlines (String.concat "/" m.name ^ ".ttn")
+let make_err           kind                   = Err kind
+let make_err_at        kind span nl_list      = Err_at (kind, span, nl_list)
+let make_err_in_file   kind span nl_list file = make_err_at (Err_in_file (kind, file)) span nl_list
+let make_err_in_module kind span (m:module_)  = make_err_in_file kind span m.newlines (String.concat "/" m.name ^ ".ttn")
 
 let wrap n = "'" ^ n ^ "'"
 let wrap2 n = "\"" ^ n ^ "\""

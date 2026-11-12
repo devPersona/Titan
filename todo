@@ -220,3 +220,19 @@ already established: @:op(+), @:const, @:prop(get, set), @:get(field), @:set(fei
     C++ generation: generates an enum with those values
 
     no arguments
+
+
+
+class Vec3 {
+    var x, y, z:Int;
+    @:op(+) inline public add(v:Vec4) { ... }
+    @:op(+) inline public add(v:Vec3) { ... }
+}
+
+class Vec4 { var x, y, z, w:Int; }
+
+class Vec2 {
+    var x, y:Int;
+    @:to inline public function toVec4() { return Vec4(x, y, 0, 0); }
+    @:to inline public function toVec3() { return Vec3(x, y, 0);    }
+}

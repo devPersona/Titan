@@ -17,6 +17,7 @@ and err_kind =
 | Undefined      of string
 | Undefined_type of string
 
+
 exception Err of err_kind
 
 type basic =
@@ -26,31 +27,33 @@ type basic =
 | String of string
 
 type op =
-| Add   (* +   *)
-| Sub   (* -   *)
-| Mul   (* *   *)
-| Div   (* /   *)
-| Asg   (* =   *)
-| AA    (* +=  *)
-| SA    (* -=  *)
-| MA    (* *=  *)
-| DA    (* /=  *)
-| Eq    (* ==  *)
-| Neq   (* !=  *)
-| Gt    (* >   *)
-| Ge    (* >=  *)
-| Lt    (* <   *)
-| Le    (* <=  *)
-| Inc   (* ++  *)
-| Dec   (* --  *)
-| Not   (* !   *)
-| And   (* &&  *)
-| Or    (* ||  *)
-| Xor   (* ^   *)
-| Amp   (* &   *)
-| Pip   (* |   *)
-| Mod   (* %   *)
-| New   (* new *)
+| Add    (* +   *)
+| Sub    (* -   *)
+| Mul    (* *   *)
+| Div    (* /   *)
+| Asg    (* =   *)
+| AAdd   (* +=  *)
+| ASub   (* -=  *)
+| AMul   (* *=  *)
+| ADiv   (* /=  *)
+| Eq     (* ==  *)
+| Neq    (* !=  *)
+| Gt     (* >   *)
+| Ge     (* >=  *)
+| Lt     (* <   *)
+| Le     (* <=  *)
+| LInc   (* ++  *)
+| LDec   (* --  *)
+| RInc   (*  ++ *)
+| RDec   (*  -- *)
+| Not    (* !   *)
+| And    (* &&  *)
+| Or     (* ||  *)
+| Xor    (* ^   *)
+| Amp    (* &   *)
+| Pip    (* |   *)
+| Mod    (* %   *)
+| New    (* new *)
 
 
 type punc =
@@ -124,7 +127,9 @@ type t =
 | TUnknown                            (* uninferred type             *)
 | TID       of t_id                   (* resolved type               *)
 | TAmb      of t_id list              (* ambiguous overload          *)
-| TTypename of t_id
+| TType     of t_id
+| TApplied  of t_id * generic_arg_def list
+| TBound    of t_id * generic_arg list * (t_id * t) list
 
 
 
@@ -171,6 +176,15 @@ and generic_arg_def =
 | GAType of t
 | GAExpr of expr
 | GAAmb  of t * expr (* ambiguous generic argument, e.g. `x<T>`, T can be either a type or an expression depending on context *)
+| GAVal  of value
+
+and value =
+| VNone
+| VInt   of int
+| VChar  of char
+| VBool  of bool
+| VTuple of value list
+| VArray of value list
 
 and modifier = { modifier: modifier_def; span: span }
 and modifier_def =

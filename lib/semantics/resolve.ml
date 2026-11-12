@@ -268,7 +268,7 @@ let rec resolve_type t ctx =
   | TFunc    (a, r) -> TFunc (resolve_type a ctx, resolve_type r ctx)
   | _               -> t (* already resolved *)
 
-and resolve_type_name n s ctx =
+and resolve_type_name n s ctx = (* TODO: correctly resolve "Self" type within classes *)
   let matching = List.find_all (fun s -> s.name = n) ctx.local in
   if  matching = [] then (push_err (Undefined_type n) s ctx; TUnknown) else
   match List.filter (fun s -> s.params = []) matching with
@@ -416,7 +416,7 @@ and resolve_generic_params resolve_nttp params ctx =
       if r_acc == a_acc then acc else
       { p with param = GPFunc (List.hd a_acc, List.hd r_acc) } :: acc
     end
-    | _ -> assert false (* TODO: add @:usingTypes support *)
+    | _ -> assert false (* TODO: add @:usingTypes support, and potentially @:requires *)
   in params |> List.fold_left fold [] |> List.rev
 
 
@@ -457,7 +457,7 @@ and resolve_alias_types ctx = (* TODO: fix circular and self dependency issues *
   in loop (Hashtbl.to_seq ctx.decls |> List.of_seq)
 
 
-and resolve_expr e ctx = 
+and resolve_expr e ctx = (* TODO: resolve constructors as EInit *)
   let expr =  
     match e.expr with
     | EVar   n            -> resolve_var n e.span ctx
@@ -545,6 +545,7 @@ and resolve_generic_expr t a ctx =
           end
           | GAType t -> GAType (resolve_type t ctx)
           | GAExpr e -> GAExpr (resolve_expr e ctx)
+          | _        -> assert false (* impossible *)
         in loop tail ({ head with arg } :: acc)
     in loop a []
   in

@@ -23,6 +23,7 @@ namespace ttn {
     template<typename ...Types>
     struct tuple;
 
+
     // Lambda decl
     template<typename>
     struct lambda;

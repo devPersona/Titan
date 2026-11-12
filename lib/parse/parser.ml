@@ -403,10 +403,10 @@ and parse_asg tokens ctx =
   let rec loop e1 t =
     match t with
     | (Op Asg, _) :: rest -> let e2, remaining = parse_asg rest ctx in loop (pack_binop e1 Asg e2) remaining
-    | (Op AA,  _) :: rest -> let e2, remaining = parse_asg rest ctx in loop (pack_binop e1 AA  e2) remaining
-    | (Op SA,  _) :: rest -> let e2, remaining = parse_asg rest ctx in loop (pack_binop e1 SA  e2) remaining
-    | (Op MA,  _) :: rest -> let e2, remaining = parse_asg rest ctx in loop (pack_binop e1 MA  e2) remaining
-    | (Op DA,  _) :: rest -> let e2, remaining = parse_asg rest ctx in loop (pack_binop e1 DA  e2) remaining
+    | (Op AAdd,  _) :: rest -> let e2, remaining = parse_asg rest ctx in loop (pack_binop e1 AAdd  e2) remaining
+    | (Op ASub,  _) :: rest -> let e2, remaining = parse_asg rest ctx in loop (pack_binop e1 ASub  e2) remaining
+    | (Op AMul,  _) :: rest -> let e2, remaining = parse_asg rest ctx in loop (pack_binop e1 AMul  e2) remaining
+    | (Op ADiv,  _) :: rest -> let e2, remaining = parse_asg rest ctx in loop (pack_binop e1 ADiv  e2) remaining
     | _                   -> e1, t
   in loop left rest
 and parse_or tokens ctx =
@@ -482,23 +482,23 @@ and parse_mul tokens ctx =
   in loop left rest 
 and parse_lunop tokens ctx =
   match tokens with
-  | (Op Not, s) :: rest -> let e,  remaining = parse_lunop rest ctx in (pack_lunop Not e s), remaining
-  | (Op Sub, s) :: rest -> let e,  remaining = parse_lunop rest ctx in (pack_lunop Sub e s), remaining
-  | (Op Inc, s) :: rest -> let e,  remaining = parse_lunop rest ctx in (pack_lunop Inc e s), remaining
-  | (Op Dec, s) :: rest -> let e,  remaining = parse_lunop rest ctx in (pack_lunop Dec e s), remaining
-  | (Op Amp, s) :: rest -> let e,  remaining = parse_lunop rest ctx in pack_expr (EAddress e) (span_join s e.span), remaining
-  | (Op New, s) :: rest -> let e,  remaining = parse_lunop rest ctx in pack_expr (ENew     e) (span_join s e.span), remaining
+  | (Op Not,  s) :: rest -> let e,  remaining = parse_lunop rest ctx in (pack_lunop Not   e s), remaining
+  | (Op Sub,  s) :: rest -> let e,  remaining = parse_lunop rest ctx in (pack_lunop Sub   e s), remaining
+  | (Op LInc, s) :: rest -> let e,  remaining = parse_lunop rest ctx in (pack_lunop LInc  e s), remaining
+  | (Op LDec, s) :: rest -> let e,  remaining = parse_lunop rest ctx in (pack_lunop LDec  e s), remaining
+  | (Op Amp,  s) :: rest -> let e,  remaining = parse_lunop rest ctx in pack_expr (EAddress e) (span_join s e.span), remaining
+  | (Op New,  s) :: rest -> let e,  remaining = parse_lunop rest ctx in pack_expr (ENew     e) (span_join s e.span), remaining
   | _                     -> parse_runop tokens ctx 
 and parse_runop tokens ctx =
   let left, rest = parse_primary tokens ctx in
   let rec loop e t =
     match t with
-    | (Op   Inc,      s) :: rest -> loop (pack_runop e Inc s) rest
-    | (Op   Dec,      s) :: rest -> loop (pack_runop e Dec s) rest
+    | (Op   LInc,      s) :: rest -> loop (pack_runop e RInc s) rest
+    | (Op   LDec,      s) :: rest -> loop (pack_runop e RDec s) rest
     | (Op   Lt,       _) :: rest -> let generics, remaining = parse_generic_args_opt rest ctx in if generics = None then e, t else loop (pack_expr (EGeneric (e, Option.get generics)) (span_make e.span.s_pos ctx.pos_e)) remaining
     | (Punc LParen,   _) :: rest -> let args,     remaining = parse_tuple            rest ctx in loop (pack_expr (ECall  (e,  args)) (span_join e.span  args.span)) remaining
     | (Punc LBracket, _) :: rest -> let index,    remaining = parse_array            rest ctx in loop (pack_expr (EIndex (e, index)) (span_join e.span index.span)) remaining
-    | (Punc Dot,      _) :: rest -> let field,    remaining = parse_primary          rest ctx in loop (pack_expr (EField (e, field)) (span_join e.span field.span)) remaining
+    | (Punc Dot,      _) :: rest -> let field,    remaining = parse_primary          rest ctx in loop (pack_expr (EField (e, field)) (span_join e.span field.span)) remaining (* TODO: desugar obj.(field, method()) into (obj.field, obj.method()), with rules to prevent stuff like obj being a constructor *)
     | (Punc QMark,    _) :: rest -> let ternary,  remaining = parse_ternay         e rest ctx in loop ternary                                                       remaining
     (* | (Punc CC,       _) :: rest -> let t,        remaining = parse_type_path_expr e rest ctx in loop t                                                             remaining *)
     | _                          -> e, t
